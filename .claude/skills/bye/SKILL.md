@@ -91,10 +91,10 @@ You are wrapping up the current working session. Summarize, persist, and hand of
    - **growth.md**: Note focus-area gaps surfaced during the session. Don't over-record.
    - **team.md**: Propose additions; do not write silently. Starter is scaffolded by `/setup-workspace init`.
 
-10. **Check project docs for staleness**: If this session made structural changes (new dependency, changed data flow, new service interaction):
-    - Read `<scope>/.claude/memory/project-context.md` — does it still reflect reality?
-    - Read `<scope>/.claude/docs/architecture.md` — does it need updating? (Skip silently if the file doesn't exist — only the workspace scope has `.claude/docs/` scaffolded.)
-    - If stale, **propose** specific updates. Do NOT write them silently — the user approves or skips.
+10. **Check project docs for staleness**: If this session made structural changes (new dependency, changed data flow, new service interaction, renamed concept):
+    - Consult the project's **doc-sync table** if its `CLAUDE.md` has one (the per-project surface→content mapping, per the doc-maintenance convention) and check each listed surface against what the session changed. If there's no table, fall back to the standard set: `<scope>/.claude/memory/project-context.md` and `<scope>/.claude/docs/architecture.md` (skip a file silently if it doesn't exist).
+    - **Propose** specific updates only where the session changed something a doc actually claims. Do NOT write them silently — the user approves or skips. Keep this lightweight; never run a heavy documentation pass inline.
+    - If the staleness is more than a quick touch-up **and `/scribe` is available**, nudge: "these docs look stale — want to run `/scribe --from-session`?" If that skill isn't installed, just surface the stale surfaces and move on — never nudge toward a command that isn't there.
 
 11. **Store in cognee** (if available): If the cognee MCP is loaded, call `cognee_add` with the session summary text, then `cognee_cognify` to integrate it into the knowledge graph for future semantic retrieval.
 
