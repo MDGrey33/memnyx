@@ -4,6 +4,11 @@ name: skill-table parity
 # README.md, CLAUDE.md, and the generated-workspace template. See
 # scripts/check_skill_tables.py for the rationale.
 
+# Least-privilege: the only job checks out the repo and runs a script,
+# so read-only access to contents is all it needs.
+permissions:
+  contents: read
+
 on:
   pull_request:
     paths:
