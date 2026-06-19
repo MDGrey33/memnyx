@@ -32,14 +32,37 @@ with `.claude-plugin/plugin.json` plus any of:
 }
 ```
 
-`name` becomes the skill namespace. Plugin skills are always namespaced as
-`/<plugin-name>:<skill-name>`. Version uses semver.
+`name` becomes the plugin namespace. Version uses semver.
+
+**The root skill is invokable bare; sub-skills and agents are namespaced.** A
+plugin's **root** skill — registered via `"skills": ["./"]`, so the plugin
+directory's own `SKILL.md` is the root — resolves to **`/<plugin-name>`** (bare).
+This holds in **both** load forms: a skills-directory plugin
+(`<name>@skills-dir`) and a marketplace-installed plugin (`<name>@<marketplace>`).
+**Sub-skills** (under `skills/<sub>/`) and **agents** always carry the
+`<plugin>:` prefix (an agent dispatches as `<plugin>:<agent-name>`). To keep a
+clean `/<name>` invocation, make your skill the plugin's root skill, not a
+sub-skill.
+
+For a marketplace plugin, the root skill resolves under **both** the bare form
+and the namespaced alias `/<plugin-name>:<plugin-name>`; the session's skill
+listing surfaces the namespaced name as canonical, but the bare command is also
+registered.
+
+Verified by behavioural resolution against Claude Code 2.1.181: with a
+`"skills": ["./"]` plugin installed from a local marketplace, both
+`/<name>` and `/<name>:<name>` resolved and fired the skill, while a bad
+sub-name (`/<name>:bogus`) and a truncated name returned `Unknown command` —
+confirming exact-match resolution, not fuzzy matching. (Asking a session to
+*report* its registered identifier is unreliable — it returns the canonical
+namespaced label and hides the bare alias; resolve-and-observe instead.)
+Re-verify against current docs — the CLI evolves.
 
 ## Plugin vs standalone
 
 | | Standalone (`.claude/`) | Plugin |
 |:--|:--|:--|
-| Skill names | `/hello` | `/my-plugin:hello` |
+| Skill names | `/hello` | root skill `/my-plugin` (bare); sub-skills `/my-plugin:sub` |
 | Best for | Personal, project-specific, quick experiments | Sharing, versioned, multi-project |
 
 The docs recommend: start standalone, convert when ready to share.
@@ -51,6 +74,54 @@ The docs recommend: start standalone, convert when ready to share.
 - `--plugin-dir` overrides an installed marketplace plugin of the same
   name for that session (except managed-force-enabled plugins).
 - `/reload-plugins` picks up changes mid-session.
+
+## Skills-directory plugin — bundle a skill with its agents, keep autoload
+
+A skills-directory plugin lives at `.claude/skills/<name>/` and **autoloads on
+session start** — the same zero-config behaviour a bare skill has, but it can
+bundle companion **agents** alongside the skill. This is the form to reach for
+when in-workspace autoload matters and you want the skill and the agents it
+dispatches to travel as one unit.
+
+Layout:
+
+```
+.claude/skills/<name>/
+├── .claude-plugin/
+│   └── plugin.json     {"name":"<name>","skills":["./"], ...}
+├── SKILL.md            ← registers as the plugin's ROOT skill (via "skills":["./"])
+├── ...companion files
+└── agents/
+    └── <agent>.md
+```
+
+- Loads automatically as `<name>@skills-dir` — user scope automatically;
+  project scope after a one-time workspace-trust prompt.
+- Root skill invoked bare `/<name>`; bundled agents dispatch as
+  `<name>:<agent>`.
+- **Choose by requirement:** skills-directory when in-workspace autoload
+  matters; **marketplace** plugin (enabled via `enabledPlugins`) when
+  distributing to other people's machines — marketplace trades zero-config
+  autoload for shareable, versioned distribution.
+
+**Scaffolding:** `claude plugin init <name> --with skills agents` generates the
+canonical layout (manifest + `skills/` + `agents/`).
+
+**Verification trap — the one that bites.** The `--plugin-dir <path>` developer
+flag namespaces *even the root skill* (`/<name>:<name>`), so loading a plugin
+that way is **not** a faithful preview of the deployed skills-directory form. A
+reader who stops at the dev-flag result will conclude the skill must be invoked
+`/<name>:<name>` and design around the wrong invocation. Verify in the real
+deployed form instead:
+
+- `claude plugin list` → shows `<name>@skills-dir … loaded`
+- `claude plugin details <name>` → component inventory (skills + agents) and
+  token cost
+- Enumerate the available skill/agent names from a session that has the plugin
+  loaded to confirm the bare-vs-namespaced exposure.
+
+(These behaviours were established empirically; the CLI surface evolves —
+re-verify against the current Claude Code docs.)
 
 ## Env vars inside plugin code
 
@@ -188,7 +259,10 @@ plugin enabled.
 
 - Don't nest `commands/`, `agents/`, `skills/`, or `hooks/` **inside**
   `.claude-plugin/`. Only `plugin.json` goes there.
-- Plugin skills are always namespaced; can't use bare `/name`.
+- A plugin's **root** skill (`"skills": ["./"]`) resolves **bare** as
+  `/<plugin>` in both load forms (marketplace also registers the
+  `/<plugin>:<plugin>` alias). Sub-skills and agents are always namespaced
+  (`/<plugin>:<name>`).
 - Plugin `settings.json` only honors `agent` and `subagentStatusLine` as of
   docs-read (docs may expand this — verify current list).
 - Plugin-provided subagent `hooks`, `mcpServers`, `permissionMode` silently
