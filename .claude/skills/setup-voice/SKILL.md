@@ -140,17 +140,38 @@ PYEOF
 # process exits (even on crash / Ctrl-C), so a dead session can't wedge the
 # queue. Synthesis above already ran in parallel; only audible playback waits.
 #
-# We BLOCK and wait our turn rather than poll-then-give-up: afplay always exits
-# when its wav ends, so the lock is held only for the length of real playback,
-# and a held lock auto-releases if the holder dies. The alarm is a last-resort
-# guard against a genuinely wedged audio device, set far above any real speech
-# queue — so a burst of long utterances queues cleanly instead of stacking.
+# Two independent timers, because a long queue and a wedged audio device are
+# different failures and the fix for each is different:
+#   - KOKORO_LOCK_TIMEOUT caps how long we wait IN LINE for the lock. If the
+#     queue really is that long we play anyway (accepting overlap) rather than
+#     drop the response. This guards the flock wait only.
+#   - the playback cap bounds the afplay run itself. A wedged audio device hangs
+#     afplay; without a cap the holder pins the global lock and freezes every
+#     other session. We cap at the clip's OWN length plus a grace margin, not a
+#     flat number — a wedge shows up as afplay running far past the audio's real
+#     length, so this never clips a legitimately long utterance, however long.
+#     On timeout we kill afplay, drop the utterance, and free the lock by exiting.
+#     THIS is what bounds a wedged device: the lock-wait timer never sees it,
+#     because the holder is past the wait and stuck inside afplay.
+# Keeping the two separate means time spent waiting in line can never eat into
+# playback time and truncate a healthy utterance.
 KOKORO_PLAY_WAV="$TMP" /usr/bin/python3 - << 'PYEOF'
-import fcntl, os, signal, subprocess
+import fcntl, os, signal, subprocess, sys, wave
 
-wav      = os.environ["KOKORO_PLAY_WAV"]
-lockf    = os.environ.get("KOKORO_LOCK", "/tmp/kokoro-say.lock")
-backstop = int(float(os.environ.get("KOKORO_LOCK_TIMEOUT", "600")))
+wav       = os.environ["KOKORO_PLAY_WAV"]
+lockf     = os.environ.get("KOKORO_LOCK", "/tmp/kokoro-say.lock")
+wait_secs = int(float(os.environ.get("KOKORO_LOCK_TIMEOUT", "180")))
+grace     = int(float(os.environ.get("KOKORO_PLAY_GRACE", "30")))
+
+# Playback cap = the clip's own length + grace. afplay should take about as long
+# as the audio is; a wedged device makes it run far longer. Scaling the cap with
+# the clip means long audio is never clipped. Fall back to a generous flat cap
+# if the wav header can't be read, so we still can't hang forever.
+try:
+    with wave.open(wav, "rb") as _w:
+        play_secs = int(_w.getnframes() / float(_w.getframerate())) + grace
+except Exception:
+    play_secs = 600
 
 class _Timeout(Exception):
     pass
@@ -160,15 +181,22 @@ def _on_alarm(signum, frame):
 
 f = open(lockf, "w")
 signal.signal(signal.SIGALRM, _on_alarm)
-signal.alarm(backstop)
+signal.alarm(wait_secs)
 try:
     fcntl.flock(f, fcntl.LOCK_EX)   # block until it is our turn — never overlap
 except _Timeout:
-    pass                            # wedged > backstop s: proceed rather than hang forever
+    print(f"kokoro-say: waited >{wait_secs}s for the playback lock; "
+          "playing anyway (sessions may overlap)", file=sys.stderr)
 finally:
     signal.alarm(0)
 
-subprocess.run(["afplay", wav])
+# run(timeout=) kills AND reaps the child, so a wedged afplay leaves no zombie.
+try:
+    subprocess.run(["afplay", wav], timeout=play_secs)
+except subprocess.TimeoutExpired:
+    print(f"kokoro-say: afplay ran past the clip's length + {grace}s grace "
+          "and was killed; audio device may be wedged — utterance dropped",
+          file=sys.stderr)
 # Lock released automatically when this process exits and the fd closes.
 PYEOF
 ```
@@ -178,6 +206,45 @@ PYEOF
 ```bash
 kokoro-say "Hello, voice interface ready."
 ```
+
+**Verify serialization and the wedged-device guard (optional, no audio hardware):**
+
+This exercises the same lock + capped-playback logic with a `sleep` stand-in for
+`afplay`, so you can confirm the behaviour without speakers:
+
+```bash
+LOCK=/tmp/kokoro-verify.$$.lock
+W=/tmp/kokoro-verify-worker.$$.py
+trap 'rm -f "$LOCK" "$W"' EXIT
+cat > "$W" <<'PYEOF'
+import fcntl, os, signal, subprocess, sys, time
+lock, real_play, clip_len, grace = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
+cap = int(clip_len + grace)            # the duration-derived playback cap
+class _T(Exception): pass
+def _alarm(*_): raise _T()
+f = open(lock, "w"); signal.signal(signal.SIGALRM, _alarm); signal.alarm(60)
+try: fcntl.flock(f, fcntl.LOCK_EX)     # block until our turn
+except _T: pass
+finally: signal.alarm(0)
+t0 = time.time(); print(f"{t0:.2f} pid {os.getpid()} got lock", flush=True)
+try:
+    subprocess.run(["sleep", str(real_play)], timeout=cap)   # afplay stand-in
+    print(f"{time.time():.2f} pid {os.getpid()} played {real_play:.0f}s fully", flush=True)
+except subprocess.TimeoutExpired:
+    print(f"{time.time():.2f} pid {os.getpid()} KILLED at cap={cap}s (wedge guard)", flush=True)
+PYEOF
+
+echo "Serialize: three 2s utterances run back-to-back, ~2s apart, never overlapping:"
+for i in 1 2 3; do /usr/bin/python3 "$W" "$LOCK" 2 2 1 & done; wait
+
+echo "Wedge: a player hanging 999s on a 2s clip is killed at clip+grace and the lock frees:"
+/usr/bin/python3 "$W" "$LOCK" 999 2 1 & sleep 0.3
+/usr/bin/python3 "$W" "$LOCK" 2 2 1 & wait
+```
+
+Expected: the three utterances release ~2s apart; the wedged player reports
+`KILLED at cap=3s (wedge guard)` and the utterance queued behind it then
+`played 2s fully` — the lock never stays pinned.
 
 ---
 
@@ -469,7 +536,8 @@ Runs `vtranscribe` inline so the transcript lands directly in the conversation.
 | `KOKORO_NO_NAME` | `0` | Set `1` to suppress the session-name prefix |
 | `KOKORO_NAME_MAXLEN` | `22` | Max length of the spoken session name |
 | `KOKORO_LOCK` | `/tmp/kokoro-say.lock` | Global playback lock (shared by all sessions) |
-| `KOKORO_LOCK_TIMEOUT` | `600` | Anti-wedge backstop: sessions block and queue for the playback lock; this only caps the wait if the audio device is genuinely stuck |
+| `KOKORO_LOCK_TIMEOUT` | `180` | Seconds to wait in line for the playback lock before playing anyway (accepting overlap) rather than dropping the response |
+| `KOKORO_PLAY_GRACE` | `30` | Slack added on top of a clip's own length before `afplay` is treated as wedged. The cap scales with the utterance, so long audio is never clipped — only a genuinely stuck device is killed |
 
 ---
 
