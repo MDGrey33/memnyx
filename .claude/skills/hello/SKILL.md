@@ -16,12 +16,15 @@ The skill's base directory is `<workspace>/.claude/skills/hello/`. Resolve `<wor
 
 ### 2. Classify cwd
 
-Compute one of four cases. The result is a *hint* for phrasing in step 7; it does not by itself decide the active project.
+Compute one of five cases. The result is a *hint* for phrasing in step 7; it does not by itself decide the active project.
 
-- **Outside workspace** — cwd is not a descendant of `<workspace>/`. Refuse with: "cd into `<workspace>` (or a subdirectory) and rerun /hello." Stop here.
+A session whose cwd is outside `<workspace>/` is allowed in **exactly ONE** case: cwd is a **registered project's own clone**, launched with `--add-dir <workspace>` (the *Registered project (external clone)* case below). The workspace is located in step 1 from this skill's own base directory, which is what makes that one case workable. **Every other outside-workspace cwd is refused** (the *Outside workspace (refuse)* case). This is a closed exception — do NOT extend it to any other outside-workspace scenario, and do NOT improvise a project binding for a directory that is not a registered project's clone.
+
+- **Registered project (in-workspace)** — cwd is under `<workspace>/projects/<slug>/` and `<slug>` is in the registry. Hint = that project.
+- **Registered project (external clone)** — cwd is *not* under `<workspace>/`, **and** `realpath(cwd)` is (or is under) `realpath(<workspace>/projects/<slug>)` for some registered `<slug>` — i.e. launched directly from the project's own clone with the workspace supplied via `--add-dir`. This is the only sanctioned outside-workspace case. Hint = that project. **In this case the project folder's own `.mcp.json` and `.claude/settings.json` are in effect, not the workspace's** — workspace-scoped MCP servers do not load (user-scope ones still do). Surface this plainly in the recap (step 6) so the engineer is not surprised by a different MCP/settings surface.
 - **Workspace-level** — cwd equals `<workspace>/`, or is under `<workspace>/` but not under `<workspace>/projects/<slug>/`. Hint = workspace-level work.
-- **Registered project** — cwd is under `<workspace>/projects/<slug>/` and `<slug>` is in the registry. Hint = that project.
 - **Unregistered project** — cwd is under `<workspace>/projects/<slug>/` but `<slug>` is NOT in the registry. Hint = offer inline registration via `/setup-workspace add-project`.
+- **Outside workspace (refuse)** — cwd is not under `<workspace>/` **and** does not resolve to any registered project's clone. **Refuse and stop here.** Give a clear, specific message: the session was started outside the workspace and outside every registered project, so Memnyx cannot bind it to a project. Tell the user exactly what to do — `cd` into `<workspace>` (or into a registered project's clone) and rerun `/hello` — and, if they intended the current folder, that it is not a registered project (point them at `/setup-workspace add-project`, or at launching from the workspace).
 
 ### 3. Load workspace-scope context
 
@@ -55,7 +58,7 @@ Inline call in session mode. Surfaces server health to fold into the recap.
 Session Start
 =============
 Workspace:  <path>
-Cwd hint:   <workspace-level | project=<slug> | unregistered=<slug> | outside>
+Cwd hint:   <workspace-level | project=<slug> | project=<slug> (external clone) | unregistered=<slug> | outside>
 Last session: <one-line summary, or "No previous sessions">
 Active sessions elsewhere: <list with ages, or "none">
 MCP status: <from /mcp-doctor>
@@ -71,6 +74,7 @@ Phrasing branches on the cwd hint. In every variant, be honest about inference a
 
 - **Workspace-level hint** → "What are you working on today? I'll infer whether to treat it as project work or workspace-level work and confirm before proceeding. You can also explicitly say 'register a new project' or 'this is a one-off task' to skip the inference."
 - **Registered-project hint** → "Looks like you're in `<slug>`. Continuing on that, or working on something else today? (If something else, I'll infer the scope and confirm — or you can ask me to register a new project.)"
+- **Registered-project (external clone) hint** → "You're in the `<slug>` clone (the workspace references it via symlink, and you launched with `--add-dir`). Continuing on `<slug>`, or something else? Heads-up: this session is using `<slug>`'s own MCP servers and settings, not the workspace's." Then resolve exactly as for the registered-project hint.
 - **Unregistered-project hint** → "`<slug>` isn't registered yet. Want me to register and scaffold it now (calls `/setup-workspace add-project`), or are you treating this as a one-off?"
 
 Resolution rules — match the registry first:

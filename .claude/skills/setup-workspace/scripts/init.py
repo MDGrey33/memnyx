@@ -55,6 +55,7 @@ CLAUDE_DIRS = ["memory", "skills", "agents", "docs"]
 # (filesystems get weird with dotfile-only directories) and is materialised as
 # `.gitignore` at the workspace.
 from _starter_maps import WORKSPACE_STARTERS as STARTER_MAP  # noqa: E402
+import launcher  # noqa: E402  — launcher.write_memnyx_sh writes the mmn shell launcher
 
 # Module-level state set by main()
 _WORKSPACE: Path | None = None
@@ -308,6 +309,15 @@ def deploy_starters(source: Path, created: list, skipped: list) -> None:
         write_starter(ws / dst_rel, src.read_text(), dst_rel, created, skipped)
 
 
+def write_launcher(created: list, skipped: list) -> None:
+    """Write <workspace>/shell/memnyx.sh (the `mmn` launcher). Derived — always
+    overwritten, like agent-guardrails. Doing it here (not leaving it to the
+    agent) guarantees the launcher exists after init; wiring it into the user's
+    shell profile is the only consent-gated part, handled by the skill's step 8."""
+    launcher.write_memnyx_sh(workspace(), is_dry_run())
+    created.append("shell/memnyx.sh (mmn launcher, overwritten)")
+
+
 def print_summary(source: Path, created: list, skipped: list) -> None:
     print()
     if is_dry_run():
@@ -336,6 +346,7 @@ def print_summary(source: Path, created: list, skipped: list) -> None:
         print(f"  - cd {workspace()} and start a new Claude session.")
         print("  - Fill in me/identity.md (placeholder values) and the Conventions block in CLAUDE.md.")
         print("  - Run /hello — it picks up registered projects, or offers to register new ones as you describe them.")
+        print("  - The `mmn` launcher was written to shell/memnyx.sh; enabling it edits your shell profile, so /setup-workspace asks before wiring it.")
         print("  - Optional: /setup-cognee for semantic search across memory.")
 
 
@@ -380,6 +391,7 @@ def main() -> None:
     deploy_settings(source, created, skipped)
     generate_claude_md(source, created, skipped)
     deploy_starters(source, created, skipped)
+    write_launcher(created, skipped)
     print_summary(source, created, skipped)
 
 

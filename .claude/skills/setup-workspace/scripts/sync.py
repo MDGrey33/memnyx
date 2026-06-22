@@ -53,6 +53,7 @@ import shutil
 from pathlib import Path
 
 from _starter_maps import PROJECT_STARTERS, WORKSPACE_STARTERS
+import launcher  # launcher.write_memnyx_sh regenerates the mmn shell launcher on apply
 
 WORKSPACE_MARKER_REL = ".claude/.workspace"
 SOURCE_REF_REL = ".claude/.source"
@@ -421,6 +422,11 @@ def main() -> None:
     else:
         targets = args.apply
     applied, skipped, feedback_hints = apply_paths(workspace, source, plan, starter_plan, targets)
+
+    # Regenerate the derived mmn launcher from the (possibly just-updated) template.
+    # Derived artifact — always overwritten; profile wiring stays consent-gated (skill step 6).
+    launcher.write_memnyx_sh(workspace, dry_run=False)
+    applied.append("shell/memnyx.sh (mmn launcher, regenerated)")
 
     print()
     print("=== sync apply ===")
