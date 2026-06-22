@@ -32,6 +32,14 @@ mmn() {
       _mmn_run "" "$@"
       ;;
     *)
+      # A slug is a single directory name. Reject path-like tokens (., .., or
+      # anything with a slash) so projects/$1 can't traverse out of projects/.
+      case "$1" in
+        "" | . | .. | */*)
+          echo "mmn: '$1' is not a registered project under $_mmn_ws/projects/" >&2
+          return 1
+          ;;
+      esac
       _mmn_dir=$(cd "$_mmn_ws/projects/$1" 2>/dev/null && pwd -P)
       if [ -n "$_mmn_dir" ] && [ -d "$_mmn_dir" ]; then
         shift
