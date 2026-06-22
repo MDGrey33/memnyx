@@ -139,23 +139,34 @@ PYEOF
 # sessions never speak over each other. fcntl.flock auto-releases when this
 # process exits (even on crash / Ctrl-C), so a dead session can't wedge the
 # queue. Synthesis above already ran in parallel; only audible playback waits.
+#
+# We BLOCK and wait our turn rather than poll-then-give-up: afplay always exits
+# when its wav ends, so the lock is held only for the length of real playback,
+# and a held lock auto-releases if the holder dies. The alarm is a last-resort
+# guard against a genuinely wedged audio device, set far above any real speech
+# queue — so a burst of long utterances queues cleanly instead of stacking.
 KOKORO_PLAY_WAV="$TMP" /usr/bin/python3 - << 'PYEOF'
-import fcntl, os, subprocess, time
+import fcntl, os, signal, subprocess
 
-wav     = os.environ["KOKORO_PLAY_WAV"]
-lockf   = os.environ.get("KOKORO_LOCK", "/tmp/kokoro-say.lock")
-timeout = float(os.environ.get("KOKORO_LOCK_TIMEOUT", "90"))
+wav      = os.environ["KOKORO_PLAY_WAV"]
+lockf    = os.environ.get("KOKORO_LOCK", "/tmp/kokoro-say.lock")
+backstop = int(float(os.environ.get("KOKORO_LOCK_TIMEOUT", "600")))
+
+class _Timeout(Exception):
+    pass
+
+def _on_alarm(signum, frame):
+    raise _Timeout()  # raise so flock unblocks (PEP 475 would otherwise auto-retry)
 
 f = open(lockf, "w")
-deadline = time.time() + timeout
-while True:
-    try:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        break
-    except BlockingIOError:
-        if time.time() >= deadline:
-            break  # queue stuck too long: play anyway rather than drop response
-        time.sleep(0.1)
+signal.signal(signal.SIGALRM, _on_alarm)
+signal.alarm(backstop)
+try:
+    fcntl.flock(f, fcntl.LOCK_EX)   # block until it is our turn — never overlap
+except _Timeout:
+    pass                            # wedged > backstop s: proceed rather than hang forever
+finally:
+    signal.alarm(0)
 
 subprocess.run(["afplay", wav])
 # Lock released automatically when this process exits and the fd closes.
@@ -458,7 +469,7 @@ Runs `vtranscribe` inline so the transcript lands directly in the conversation.
 | `KOKORO_NO_NAME` | `0` | Set `1` to suppress the session-name prefix |
 | `KOKORO_NAME_MAXLEN` | `22` | Max length of the spoken session name |
 | `KOKORO_LOCK` | `/tmp/kokoro-say.lock` | Global playback lock (shared by all sessions) |
-| `KOKORO_LOCK_TIMEOUT` | `90` | Seconds to wait for the lock before playing anyway |
+| `KOKORO_LOCK_TIMEOUT` | `600` | Anti-wedge backstop: sessions block and queue for the playback lock; this only caps the wait if the audio device is genuinely stuck |
 
 ---
 
