@@ -56,6 +56,7 @@ The init action is **idempotent**. Re-running is safe:
 - Skills, agents, and `agent-guardrails.md` are **overwritten** from source (always fresh — these are upstream-owned).
 - Other docs (`architecture.md`, `conventions.md`, `cognee-usage.md`, etc.) are deployed only if missing in the workspace (templates, evolved by the user after init).
 - `CLAUDE.md`, `MEMORY.md`, `lessons-learned.md`, `project-context.md`, `me/*.md`, `.gitignore`, `settings.json` are deployed only if missing — never overwritten.
+- `<workspace>/shell/memnyx.sh` (the `mmn` launcher) is a **derived artifact** — overwritten on every init and sync. The user's shell profile is edited only with explicit consent, and only via an idempotent managed block (a one-time `.memnyx-backup` of the profile is saved before the first edit).
 
 ### Steps
 
@@ -79,6 +80,7 @@ The init action is **idempotent**. Re-running is safe:
    - `<workspace>/.gitignore` — gitignores per-engineer working state.
 6. **Settings.json:** copy from source only if `<workspace>/.claude/settings.json` is missing. If exists, skip with a note suggesting `/setup-workspace sync` for future updates.
 7. **Print summary:** what was created, what was skipped, and suggested next steps (`/setup-workspace add-project`, `/setup-cognee`).
+8. **Offer to wire the shell launcher (consent-gated).** `init.py` has already written `<workspace>/shell/memnyx.sh` (the `mmn` command — see *Shell launcher* below); that file is safe and unconditional. The only thing left is **editing the user's shell profile so it sources that file** — which `init.py` deliberately does NOT do. Show the user the detected profile and the managed `source` block, ask for explicit consent, and only then run `launcher.py --wire-profile`. If they decline, the block is theirs to add by hand. Offer this; never wire a profile silently.
 
 ### Implementation
 
@@ -88,7 +90,15 @@ The init action is delegated to `scripts/init.py`:
 python3 .claude/skills/setup-workspace/scripts/init.py --workspace <path> [--source <path>] [--dry-run]
 ```
 
-When run from cwd = source clone (the recommended flow), the relative path above works. From elsewhere, use the absolute path to the script in the source.
+When run from cwd = source clone (the recommended flow), the relative path above works. From elsewhere, use the absolute path to the script in the source. `init.py` writes `<workspace>/shell/memnyx.sh` itself (step 8) — so the launcher always exists after init, no separate write step needed.
+
+Only the profile wiring is a separate, consent-gated call (step 8). After the user consents:
+
+```
+python3 .claude/skills/setup-workspace/scripts/launcher.py --workspace <path> --wire-profile [--profile <path>] [--shell <name>]
+```
+
+`--profile` overrides shell-based detection — use it when the user's setup differs (e.g. macOS login bash that reads `~/.bash_profile`, not `~/.bashrc`). Run with `--dry-run` first to preview the exact profile edit.
 
 ## `add-project <slug> [description]`
 
@@ -186,6 +196,7 @@ Does NOT touch `CLAUDE.md`, workstreams, sessions, settings.json, or other `docs
    - Skip entirely?
 4. **Apply chosen changes:** re-run `sync.py` with `--apply-all` or `--apply <relpath>...`. The script copies source-version files to the workspace and prints what was applied. If a `feedback_*.md` starter landed, also surface the hint so the user can manually add the index line to their `MEMORY.md`.
 5. **Print summary:** what was applied, what was kept, what remains as `local-only` or starter `divergent` (so the user knows their custom additions are preserved).
+6. **Shell launcher.** `sync.py` regenerates `<workspace>/shell/memnyx.sh` from the (possibly updated) template automatically on every apply — a derived artifact, no separate step. Only if the profile's managed block is missing (or the user asks) do you offer `launcher.py --wire-profile` (consent-gated, exactly as in init). Never edit the profile without consent.
 
 ### Implementation
 
@@ -193,7 +204,18 @@ Does NOT touch `CLAUDE.md`, workstreams, sessions, settings.json, or other `docs
 python3 .claude/skills/setup-workspace/scripts/sync.py --workspace <path> [--source <path>] [--apply <relpath>...] [--apply-all]
 ```
 
-Default mode (no `--apply` flags) prints the plan only.
+Default mode (no `--apply` flags) prints the plan only; apply mode also regenerates `shell/memnyx.sh` (it imports `launcher.write_memnyx_sh`).
+
+## Shell launcher (`mmn`)
+
+`init` and `sync` write `<workspace>/shell/memnyx.sh` and — with explicit consent — wire it into the user's shell profile via an idempotent managed block. It defines one command, `mmn`, for engineers who prefer launching from a project clone over the workspace root:
+
+- `mmn` — launch Claude in the current folder with `--add-dir <workspace>`, so the workspace's skills load.
+- `mmn <slug>` — cd to the **real clone** of the registered project `<slug>` (resolving the `projects/<slug>` symlink via `cd` + `pwd -P`), then launch. The project's own `.mcp.json`/settings load; an unrecognised slug is refused, not guessed.
+
+Before launching, `mmn` prints a banner showing the directory it will `cd` into and the exact command it runs (the `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir …` line) — no hidden behaviour. Colour is used only on a TTY.
+
+This is the *supported secondary launch flow* in `docs/v2-design-principles.md`: `/hello` binds such a session by matching `realpath(cwd)` to a registered project. `memnyx.sh` is POSIX-safe (sh/bash/zsh) and derived — never hand-edit it; change `templates/memnyx.sh.tmpl` instead. The launcher exports `MEMNYX_WORKSPACE` and scopes `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` to the command, so the workspace `CLAUDE.md` loads via `--add-dir` without affecting other `claude` invocations.
 
 ## Important rules
 

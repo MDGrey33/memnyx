@@ -53,10 +53,10 @@ import shutil
 from pathlib import Path
 
 from _starter_maps import PROJECT_STARTERS, WORKSPACE_STARTERS
+from _common import die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL
+import launcher  # launcher.write_memnyx_sh regenerates the mmn shell launcher on apply
 
-WORKSPACE_MARKER_REL = ".claude/.workspace"
 SOURCE_REF_REL = ".claude/.source"
-SOURCE_BOILERPLATE_MARKER_REL = ".claude/skills/setup-workspace/templates/workspace-CLAUDE.md.tmpl"
 REGISTRY_REL = ".claude/projects-index.json"
 
 SYNCED_DIRS = [".claude/skills", ".claude/agents"]
@@ -68,28 +68,6 @@ STARTERS_PROJECT_DIR_REL = ".claude/skills/setup-workspace/templates/starters/pr
 # Skipped during comparison (runtime artifacts, OS metadata).
 SKIP_DIR_NAMES = {"__pycache__"}
 SKIP_FILE_NAMES = {".DS_Store"}
-
-
-def die(msg: str) -> None:
-    print(f"error: {msg}", file=sys.stderr)
-    sys.exit(1)
-
-
-def is_v2_workspace(p: Path) -> bool:
-    return (p / WORKSPACE_MARKER_REL).is_file()
-
-
-def is_v2_boilerplate(p: Path) -> bool:
-    return (p / SOURCE_BOILERPLATE_MARKER_REL).is_file()
-
-
-def resolve_workspace(workspace_arg: str) -> Path:
-    p = Path(workspace_arg).expanduser().resolve()
-    if not p.is_dir():
-        die(f"workspace path is not a directory: {p}")
-    if not is_v2_workspace(p):
-        die(f"{p} is not a v2 workspace (missing {WORKSPACE_MARKER_REL}). Run /setup-workspace init first.")
-    return p
 
 
 def resolve_source(source_arg: str | None, workspace: Path) -> Path:
@@ -110,7 +88,7 @@ def resolve_source(source_arg: str | None, workspace: Path) -> Path:
     if not p.is_dir():
         die(f"source path is not a directory: {p}")
     if not is_v2_boilerplate(p):
-        die(f"source at {p} is not a v2 boilerplate (missing {SOURCE_BOILERPLATE_MARKER_REL})")
+        die(f"source at {p} is not a v2 boilerplate (missing {BOILERPLATE_MARKER_REL})")
     return p
 
 
@@ -421,6 +399,11 @@ def main() -> None:
     else:
         targets = args.apply
     applied, skipped, feedback_hints = apply_paths(workspace, source, plan, starter_plan, targets)
+
+    # Regenerate the derived mmn launcher from the (possibly just-updated) template.
+    # Derived artifact — always overwritten; profile wiring stays consent-gated (skill step 6).
+    launcher.write_memnyx_sh(workspace, dry_run=False)
+    applied.append("shell/memnyx.sh (mmn launcher, regenerated)")
 
     print()
     print("=== sync apply ===")

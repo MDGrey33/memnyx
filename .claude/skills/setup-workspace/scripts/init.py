@@ -37,7 +37,6 @@ import argparse
 import shutil
 from pathlib import Path
 
-WORKSPACE_TEMPLATE_REL = ".claude/skills/setup-workspace/templates/workspace-CLAUDE.md.tmpl"
 STARTERS_DIR_REL = ".claude/skills/setup-workspace/templates/starters/workspace"
 
 # Dirs to create at workspace root.
@@ -55,6 +54,8 @@ CLAUDE_DIRS = ["memory", "skills", "agents", "docs"]
 # (filesystems get weird with dotfile-only directories) and is materialised as
 # `.gitignore` at the workspace.
 from _starter_maps import WORKSPACE_STARTERS as STARTER_MAP  # noqa: E402
+from _common import die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL  # noqa: E402
+import launcher  # noqa: E402  — launcher.write_memnyx_sh writes the mmn shell launcher
 
 # Module-level state set by main()
 _WORKSPACE: Path | None = None
@@ -71,29 +72,13 @@ def is_dry_run() -> bool:
     return _DRY_RUN
 
 
-def die(msg: str) -> None:
-    print(f"error: {msg}", file=sys.stderr)
-    sys.exit(1)
-
-
-def is_v2_boilerplate(p: Path) -> bool:
-    return (p / WORKSPACE_TEMPLATE_REL).is_file()
-
-
-def resolve_workspace(workspace_arg: str) -> Path:
-    p = Path(workspace_arg).expanduser().resolve()
-    if p.exists() and not p.is_dir():
-        die(f"workspace path is not a directory: {p}")
-    return p
-
-
 def resolve_source(source_arg: str | None) -> Path:
     if source_arg:
         p = Path(source_arg).expanduser().resolve()
         if not p.is_dir():
             die(f"source path is not a directory: {p}")
         if not is_v2_boilerplate(p):
-            die(f"source at {p} is not a v2 boilerplate (missing {WORKSPACE_TEMPLATE_REL})")
+            die(f"source at {p} is not a v2 boilerplate (missing {BOILERPLATE_MARKER_REL})")
         return p
 
     cwd = Path.cwd().resolve()
@@ -273,7 +258,7 @@ def deploy_settings(source: Path, created: list, skipped: list) -> None:
 
 
 def generate_claude_md(source: Path, created: list, skipped: list) -> None:
-    template = source / WORKSPACE_TEMPLATE_REL
+    template = source / BOILERPLATE_MARKER_REL
     dst = workspace() / "CLAUDE.md"
     if dst.exists():
         skipped.append("CLAUDE.md (exists)")
@@ -308,6 +293,15 @@ def deploy_starters(source: Path, created: list, skipped: list) -> None:
         write_starter(ws / dst_rel, src.read_text(), dst_rel, created, skipped)
 
 
+def write_launcher(created: list, skipped: list) -> None:
+    """Write <workspace>/shell/memnyx.sh (the `mmn` launcher). Derived — always
+    overwritten, like agent-guardrails. Doing it here (not leaving it to the
+    agent) guarantees the launcher exists after init; wiring it into the user's
+    shell profile is the only consent-gated part, handled by the skill's step 8."""
+    launcher.write_memnyx_sh(workspace(), is_dry_run())
+    created.append("shell/memnyx.sh (mmn launcher, overwritten)")
+
+
 def print_summary(source: Path, created: list, skipped: list) -> None:
     print()
     if is_dry_run():
@@ -336,6 +330,7 @@ def print_summary(source: Path, created: list, skipped: list) -> None:
         print(f"  - cd {workspace()} and start a new Claude session.")
         print("  - Fill in me/identity.md (placeholder values) and the Conventions block in CLAUDE.md.")
         print("  - Run /hello — it picks up registered projects, or offers to register new ones as you describe them.")
+        print("  - The `mmn` launcher was written to shell/memnyx.sh; enabling it edits your shell profile, so /setup-workspace asks before wiring it.")
         print("  - Optional: /setup-cognee for semantic search across memory.")
 
 
@@ -357,7 +352,7 @@ def main() -> None:
     global _WORKSPACE, _DRY_RUN
     args = parse_args()
     _DRY_RUN = args.dry_run
-    _WORKSPACE = resolve_workspace(args.workspace)
+    _WORKSPACE = resolve_workspace(args.workspace, require_workspace=False)
     source = resolve_source(args.source)
     validate_layout(_WORKSPACE, source)
 
@@ -380,6 +375,7 @@ def main() -> None:
     deploy_settings(source, created, skipped)
     generate_claude_md(source, created, skipped)
     deploy_starters(source, created, skipped)
+    write_launcher(created, skipped)
     print_summary(source, created, skipped)
 
 
