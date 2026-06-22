@@ -37,23 +37,13 @@ import os
 import shutil
 from pathlib import Path
 
+from _common import die, resolve_workspace  # noqa: F401  (re-exported for callers/tests)
+
 TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "memnyx.sh.tmpl"
 MEMNYX_SH_REL = "shell/memnyx.sh"
 
 BEGIN = "# >>> memnyx >>> (managed by /setup-workspace — do not edit between these markers)"
 END = "# <<< memnyx <<<"
-
-
-def die(msg: str) -> None:
-    print(f"error: {msg}", file=sys.stderr)
-    sys.exit(1)
-
-
-def resolve_workspace(arg: str) -> Path:
-    p = Path(arg).expanduser().resolve()
-    if not (p / ".claude" / ".workspace").is_file():
-        die(f"{p} is not a memnyx workspace (missing .claude/.workspace)")
-    return p
 
 
 def write_memnyx_sh(workspace: Path, dry_run: bool) -> Path:
