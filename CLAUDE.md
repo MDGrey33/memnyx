@@ -87,6 +87,7 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 - `/setup-playwright-mcp` → `/mcp-doctor`
 - `/contribute` → `/sanitizer` (blocks staging on any finding)
 - `/pull-contributions` → `/sanitizer --check` (blocks pull on any finding)
+- `/scribe` → `/sanitizer` (blocks on findings in generated docs)
 
 ## Skills Governance
 

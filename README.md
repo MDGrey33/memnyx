@@ -77,6 +77,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 /setup-playwright-mcp ──> /mcp-doctor
 /contribute ──> /sanitizer (blocks staging on any finding)
 /pull-contributions ──> /sanitizer --check (blocks pull on any finding)
+/scribe ──> /sanitizer (blocks on findings in generated docs)
 /sanitizer (manual, on any file/dir/glob)
 ```
 
