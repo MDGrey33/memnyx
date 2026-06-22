@@ -11,7 +11,7 @@ Installs a fully local voice pipeline:
 - **STT:** `mlx-whisper` — OpenAI Whisper on Apple MLX, Metal-accelerated
 - **TTS:** `kokoro-onnx` — Kokoro 82M neural TTS, offline, two context voices
 - **Recording:** `sox` (`rec`) — microphone capture with silence detection
-- **Scripts:** `voice-claude`, `vtranscribe`, `kokoro-say` in `~/bin/`
+- **Scripts:** `voice-claude`, `vtranscribe`, `kokoro-say` in `~/.local/bin/`
 
 ---
 
@@ -22,7 +22,7 @@ Installs a fully local voice pipeline:
 - `uv` — `brew install uv`
 - Python 3.12 — `brew install python@3.12`
 - `ffmpeg` — `brew install ffmpeg`
-- `~/bin/` exists and is on `$PATH`
+- `~/.local/bin/` on `$PATH` — the standard per-user bin dir; `uv` (above) already installs here, so it is usually present and on `PATH`. Create it and add it to `PATH` if missing.
 - `claude` CLI installed and authenticated
 
 ---
@@ -77,7 +77,7 @@ curl -L -o ~/.cache/kokoro/voices-v1.0.bin \
 
 ## Step 4 — Create `kokoro-say`
 
-Create `~/bin/kokoro-say` with the content below, then `chmod +x ~/bin/kokoro-say`.
+Create `~/.local/bin/kokoro-say` with the content below, then `chmod +x ~/.local/bin/kokoro-say`.
 
 ```
 #!/usr/bin/env bash
@@ -174,7 +174,7 @@ kokoro-say "Hello, voice interface ready."
 
 This helper resolves the short name `kokoro-say` speaks before each utterance.
 It is optional — without it, `kokoro-say` simply adds no prefix. Create
-`~/bin/kokoro-session-name`, then `chmod +x ~/bin/kokoro-session-name`.
+`~/.local/bin/kokoro-session-name`, then `chmod +x ~/.local/bin/kokoro-session-name`.
 
 Resolution order: `$KOKORO_SESSION_NAME` (explicit, any terminal) → the current
 [cmux](https://cmux.io) tab title (automatic, when running under cmux) → empty.
@@ -246,7 +246,7 @@ KOKORO_SESSION_NAME="Alpha" kokoro-say "naming works"   # says: Alpha. naming wo
 
 ## Step 5 — Create `vtranscribe`
 
-Create `~/bin/vtranscribe` with the content below, then `chmod +x ~/bin/vtranscribe`.
+Create `~/.local/bin/vtranscribe` with the content below, then `chmod +x ~/.local/bin/vtranscribe`.
 
 ```
 #!/usr/bin/env bash
@@ -289,7 +289,7 @@ vtranscribe   # speak a sentence, check output
 
 ## Step 6 — Create `voice-claude`
 
-Create `~/bin/voice-claude` with the content below, then `chmod +x ~/bin/voice-claude`.
+Create `~/.local/bin/voice-claude` with the content below, then `chmod +x ~/.local/bin/voice-claude`.
 
 ```
 #!/usr/bin/env bash
