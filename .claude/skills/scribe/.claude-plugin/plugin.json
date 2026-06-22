@@ -1,0 +1,9 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "scribe",
+  "version": "0.1.0",
+  "description": "Generate and maintain verified, Claude-facing project documentation (CLAUDE.md, .claude/docs, project-context, README) from facts grounded in source. Confirmed facts go to committed docs; inferred or uncertain ones go to a separate hazards artifact, never silently into the repo.",
+  "skills": [
+    "./"
+  ]
+}

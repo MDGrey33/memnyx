@@ -58,6 +58,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 | `/sanitizer` | Auto (via `/contribute`, `/pull-contributions`) or manual | Scrub files for secrets, PII, private context, tone risks before publish. `--check` mode for CI gates. |
 | `/finance-controller` | Manual (weekly sweep) | Audit CLAUDE.md, skills, MCPs for cost and context efficiency. Reports + delegates; never edits directly. |
 | `/claude-expert` | Manual | Reference for Claude Code surfaces (skills vs hooks vs subagents vs MCPs vs memory vs settings). Answers "where should this live" and routes to the doer skill. |
+| `/scribe` | Manual | Generate or maintain a project's Claude-facing docs (`CLAUDE.md`, `.claude/docs/*`, project-context, README) from verified facts. `--deep` adds per-subsystem `scribe-explorer` exploration plus an independent `scribe-verifier` pass; unconfirmed claims go to a hazards artifact. Packaged as a skills-directory plugin (`scribe@skills-dir`), bundling its two agents. |
 | `/setup-auto-memory` | Manual | Wire in the optional auto-memory system (typed atomic files in `~/.claude/projects/<slug>/memory/`). See `auto-memory/README.md`. |
 | `/setup-playwright-mcp` | Manual | Install and configure Playwright MCP for browser automation |
 | `/research` | Manual | Unified research with three depth modes — `--shallow` (single-pass parallel web search via the `research-expert` agent), `--standard` (decompose → parallel subagents → synthesize → cite-check), `--deep` (9-stage pipeline: breadth, depth, gap-fill, contradiction detection, theory, fact-check, tiered output). Replaces the former `deep-research-orchestrator`. |
@@ -76,6 +77,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 /setup-playwright-mcp ──> /mcp-doctor
 /contribute ──> /sanitizer (blocks staging on any finding)
 /pull-contributions ──> /sanitizer --check (blocks pull on any finding)
+/scribe ──> /sanitizer (blocks on findings in generated docs)
 /sanitizer (manual, on any file/dir/glob)
 ```
 
