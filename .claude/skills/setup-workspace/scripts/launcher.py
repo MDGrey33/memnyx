@@ -37,7 +37,7 @@ import os
 import shutil
 from pathlib import Path
 
-from _common import die, resolve_workspace  # noqa: F401  (re-exported for callers/tests)
+from _common import die, resolve_workspace
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "templates" / "memnyx.sh.tmpl"
 MEMNYX_SH_REL = "shell/memnyx.sh"
