@@ -118,8 +118,9 @@ if [[ "${KOKORO_NO_NAME:-0}" != "1" ]] && command -v kokoro-session-name >/dev/n
   fi
 fi
 
-TMP=$(mktemp /tmp/kokoro.XXXXXX.wav)
-trap 'rm -f "$TMP"' EXIT
+TMP=$(mktemp /tmp/kokoro.XXXXXX)   # BSD mktemp only randomises TRAILING X's, so a
+mv "$TMP" "$TMP.wav"; TMP="$TMP.wav"  # .XXXXXX.wav template would NOT be unique and
+trap 'rm -f "$TMP"' EXIT              # concurrent sessions would collide — add .wav after.
 
 ~/.local/share/kokoro-venv/bin/python - "$VOICE" "$TEXT" "$TMP" << 'PYEOF'
 import sys, warnings
@@ -156,22 +157,29 @@ PYEOF
 # Keeping the two separate means time spent waiting in line can never eat into
 # playback time and truncate a healthy utterance.
 KOKORO_PLAY_WAV="$TMP" /usr/bin/python3 - << 'PYEOF'
-import fcntl, os, signal, subprocess, sys, wave
+import fcntl, math, os, signal, subprocess, sys, wave
 
 wav       = os.environ["KOKORO_PLAY_WAV"]
 lockf     = os.environ.get("KOKORO_LOCK", "/tmp/kokoro-say.lock")
-wait_secs = int(float(os.environ.get("KOKORO_LOCK_TIMEOUT", "180")))
-grace     = int(float(os.environ.get("KOKORO_PLAY_GRACE", "30")))
+# Clamp to >=1: int(float(...)) truncates any value <1 to 0, and signal.alarm(0)
+# DISABLES the alarm — that would silently turn off the lock-wait guard.
+wait_secs = max(1, int(float(os.environ.get("KOKORO_LOCK_TIMEOUT", "180"))))
+grace     = max(0, int(float(os.environ.get("KOKORO_PLAY_GRACE", "30"))))
 
 # Playback cap = the clip's own length + grace. afplay should take about as long
 # as the audio is; a wedged device makes it run far longer. Scaling the cap with
-# the clip means long audio is never clipped. Fall back to a generous flat cap
-# if the wav header can't be read, so we still can't hang forever.
+# the clip means long audio is never clipped. ceil (not int) so a sub-second clip
+# keeps its full second; fall back to a flat cap if the header can't be read.
 try:
     with wave.open(wav, "rb") as _w:
-        play_secs = int(_w.getnframes() / float(_w.getframerate())) + grace
+        play_secs = math.ceil(_w.getnframes() / float(_w.getframerate())) + grace
 except Exception:
-    play_secs = 600
+    play_secs = 600                 # header unreadable: flat anti-hang ceiling
+# Floor at 5s: afplay's wall-time includes ~1s of CoreAudio/device startup on top
+# of the audio length, so a tiny clip (or grace=0) must still allow for that or a
+# healthy utterance is false-killed. A real wedge hangs forever, so a 5s floor
+# still catches it.
+play_secs = max(5, play_secs)
 
 class _Timeout(Exception):
     pass
@@ -536,8 +544,8 @@ Runs `vtranscribe` inline so the transcript lands directly in the conversation.
 | `KOKORO_NO_NAME` | `0` | Set `1` to suppress the session-name prefix |
 | `KOKORO_NAME_MAXLEN` | `22` | Max length of the spoken session name |
 | `KOKORO_LOCK` | `/tmp/kokoro-say.lock` | Global playback lock (shared by all sessions) |
-| `KOKORO_LOCK_TIMEOUT` | `180` | Seconds to wait in line for the playback lock before playing anyway (accepting overlap) rather than dropping the response |
-| `KOKORO_PLAY_GRACE` | `30` | Slack added on top of a clip's own length before `afplay` is treated as wedged. The cap scales with the utterance, so long audio is never clipped — only a genuinely stuck device is killed |
+| `KOKORO_LOCK_TIMEOUT` | `180` | Seconds to wait in line for the playback lock before playing anyway (accepting overlap) rather than dropping the response. Values below 1 are clamped to 1s |
+| `KOKORO_PLAY_GRACE` | `30` | Slack added on top of a clip's own length before `afplay` is treated as wedged. The cap scales with the utterance, so long audio is never clipped — only a genuinely stuck device is killed. If the wav header can't be read, the cap falls back to a flat 600s |
 
 ---
 
