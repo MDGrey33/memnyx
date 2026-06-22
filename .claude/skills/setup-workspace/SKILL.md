@@ -100,8 +100,6 @@ python3 .claude/skills/setup-workspace/scripts/launcher.py --workspace <path> --
 
 `--profile` overrides shell-based detection — use it when the user's setup differs (e.g. macOS login bash that reads `~/.bash_profile`, not `~/.bashrc`). Run with `--dry-run` first to preview the exact profile edit.
 
-`--profile` overrides shell-based detection — use it when the user's setup differs (e.g. macOS login bash that reads `~/.bash_profile`, not `~/.bashrc`).
-
 ## `add-project <slug> [description]`
 
 Scaffold a project under `<workspace>/projects/<slug>/` and register it via `/project-registry add`.
