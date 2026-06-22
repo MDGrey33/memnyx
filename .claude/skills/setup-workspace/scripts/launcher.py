@@ -34,6 +34,7 @@ if sys.version_info < (3, 10):
 
 import argparse
 import os
+import shlex
 import shutil
 from pathlib import Path
 
@@ -53,7 +54,8 @@ def write_memnyx_sh(workspace: Path, dry_run: bool) -> Path:
     raw = TEMPLATE.read_text()
     if "{{workspace_path}}" not in raw:
         die(f"template {TEMPLATE} is missing the {{{{workspace_path}}}} token — refusing to write a launcher with an unset workspace path")
-    content = raw.replace("{{workspace_path}}", str(workspace))
+    # shlex.quote → the template must NOT pre-quote the token (it doesn't).
+    content = raw.replace("{{workspace_path}}", shlex.quote(str(workspace)))
     dst = workspace / MEMNYX_SH_REL
     if not dry_run:
         dst.parent.mkdir(parents=True, exist_ok=True)
@@ -62,8 +64,8 @@ def write_memnyx_sh(workspace: Path, dry_run: bool) -> Path:
 
 
 def managed_block(workspace: Path) -> str:
-    sh = workspace / MEMNYX_SH_REL
-    return f'{BEGIN}\n[ -f "{sh}" ] && . "{sh}"\n{END}\n'
+    sh = shlex.quote(str(workspace / MEMNYX_SH_REL))
+    return f"{BEGIN}\n[ -f {sh} ] && . {sh}\n{END}\n"
 
 
 def detect_profile(shell_arg: str | None) -> tuple[str, Path]:

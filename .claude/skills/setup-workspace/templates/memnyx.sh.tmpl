@@ -2,7 +2,8 @@
 # Do not edit: this file is overwritten on every sync. Sourced from your shell
 # profile via a managed block. POSIX-safe — works under sh, bash, and zsh.
 
-export MEMNYX_WORKSPACE="{{workspace_path}}"
+# Value is shell-quoted by launcher.py (shlex.quote) — do NOT add quotes here.
+export MEMNYX_WORKSPACE={{workspace_path}}
 
 # mmn — launch Claude with the memnyx workspace attached.
 #   mmn              launch in the current folder, with the workspace added
