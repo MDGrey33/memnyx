@@ -393,9 +393,14 @@ CONTEXT="${VC_CONTEXT:-personal}"
 LOOP=false
 SAY_PID=""
 
-declare -A VOICE_MAP
-VOICE_MAP[personal]="af_heart"
-VOICE_MAP[tech]="af_bella"
+# Map a context to its voice. A `case` function rather than an associative
+# array (`declare -A`) so the script runs on macOS system bash 3.2.
+voice_for() {
+  case "$1" in
+    tech) printf 'af_bella' ;;
+    *)    printf 'af_heart' ;;
+  esac
+}
 
 while getopts ":lc:m:h" opt; do
   case "$opt" in
@@ -409,7 +414,7 @@ while getopts ":lc:m:h" opt; do
 done
 
 speak() {
-  local voice="${VOICE_MAP[$CONTEXT]:-af_heart}"
+  local voice; voice="$(voice_for "$CONTEXT")"
   kokoro-say -v "$voice" "$1" 2>/dev/null &
   SAY_PID=$!
 }
@@ -481,7 +486,7 @@ one_turn() {
 
 if $LOOP; then
   printf 'Voice loop active — Ctrl-C to exit.\n'
-  printf 'Context: %s (%s)\n\n' "$CONTEXT" "${VOICE_MAP[$CONTEXT]}"
+  printf 'Context: %s (%s)\n\n' "$CONTEXT" "$(voice_for "$CONTEXT")"
   while true; do
     one_turn
   done
