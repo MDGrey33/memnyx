@@ -54,7 +54,11 @@ CLAUDE_DIRS = ["memory", "skills", "agents", "docs"]
 # (filesystems get weird with dotfile-only directories) and is materialised as
 # `.gitignore` at the workspace.
 from _starter_maps import WORKSPACE_STARTERS as STARTER_MAP  # noqa: E402
-from _common import die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL  # noqa: E402
+from _common import (  # noqa: E402
+    die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL,
+    fork_include_block, source_is_fork, render_template,
+    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL,
+)
 import launcher  # noqa: E402  — launcher.write_memnyx_sh writes the mmn shell launcher
 
 # Module-level state set by main()
@@ -266,11 +270,47 @@ def generate_claude_md(source: Path, created: list, skipped: list) -> None:
     if not template.is_file():
         die(f"template missing at {template}")
     if not is_dry_run():
-        content = template.read_text()
-        content = content.replace("{{workspace_name}}", workspace().name)
-        content = content.replace("{{workspace_path}}", str(workspace()))
+        content = render_template(template, workspace())
+        content = content.replace("{{fork_overlay_include}}", fork_include_block(source))
         dst.write_text(content)
     created.append("CLAUDE.md")
+
+
+def deploy_fork_overlay(source: Path, created: list, skipped: list) -> None:
+    """Deploy CLAUDE.fork.md when the source is a fork (by git provenance) and ships
+    a fork overlay template. The template travels with the skill; only a fork's
+    filled copy gets deployed. Deploy-if-missing; sync refreshes it thereafter."""
+    if not source_is_fork(source):
+        skipped.append("CLAUDE.fork.md (source is canonical or unknown — no fork overlay)")
+        return
+    template = source / FORK_OVERLAY_TEMPLATE_REL
+    if not template.is_file():
+        skipped.append("CLAUDE.fork.md (source is a fork but ships no overlay template)")
+        return
+    dst = workspace() / "CLAUDE.fork.md"
+    if dst.exists():
+        skipped.append("CLAUDE.fork.md (exists)")
+        return
+    if not is_dry_run():
+        dst.write_text(render_template(template, workspace()))
+    created.append("CLAUDE.fork.md")
+
+
+def seed_local_overlay(source: Path, created: list, skipped: list) -> None:
+    """Seed CLAUDE.local.md from its template if absent. User-owned, loaded natively
+    by Claude Code alongside CLAUDE.md; never overwritten. Managed here (not via the
+    generic starter walk) so sync can gate seeding on the base being layered."""
+    dst = workspace() / "CLAUDE.local.md"
+    if dst.exists():
+        skipped.append("CLAUDE.local.md (exists)")
+        return
+    seed = source / LOCAL_OVERLAY_SEED_REL
+    if not seed.is_file():
+        skipped.append("CLAUDE.local.md (no seed template in source)")
+        return
+    if not is_dry_run():
+        dst.write_text(render_template(seed, workspace()))
+    created.append("CLAUDE.local.md")
 
 
 def write_starter(path: Path, content: str, label: str, created: list, skipped: list) -> None:
@@ -328,7 +368,7 @@ def print_summary(source: Path, created: list, skipped: list) -> None:
     else:
         print("Next steps:")
         print(f"  - cd {workspace()} and start a new Claude session.")
-        print("  - Fill in me/identity.md (placeholder values) and the Conventions block in CLAUDE.md.")
+        print("  - Fill in me/identity.md (placeholder values) and the Conventions block in CLAUDE.local.md.")
         print("  - Run /hello — it picks up registered projects, or offers to register new ones as you describe them.")
         print("  - The `mmn` launcher was written to shell/memnyx.sh; enabling it edits your shell profile, so /setup-workspace asks before wiring it.")
         print("  - Optional: /setup-cognee for semantic search across memory.")
@@ -374,6 +414,8 @@ def main() -> None:
     deploy_other_docs(source, created, skipped)
     deploy_settings(source, created, skipped)
     generate_claude_md(source, created, skipped)
+    deploy_fork_overlay(source, created, skipped)
+    seed_local_overlay(source, created, skipped)
     deploy_starters(source, created, skipped)
     write_launcher(created, skipped)
     print_summary(source, created, skipped)

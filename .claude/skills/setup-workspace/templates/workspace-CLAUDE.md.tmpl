@@ -23,7 +23,9 @@ This workspace uses a layered memory system. Optionally, it integrates with a se
 
 ```
 {{workspace_path}}/
-├── CLAUDE.md                       # this file
+├── CLAUDE.md                       # this file (base — overwritten by /setup-workspace sync)
+├── CLAUDE.fork.md                  # fork overlay, if any (synced from the boilerplate fork)
+├── CLAUDE.local.md                 # workspace-local overlay (native; never synced)
 ├── .claude/
 │   ├── skills/  agents/  docs/     # deployed by /setup-workspace
 │   ├── memory/                     # workspace MEMORY/lessons
@@ -61,6 +63,10 @@ Separation of concerns: `workstreams/` files are open-item ledgers that `/bye` w
 Run `/setup-cognee` or `/setup-wikibase` to install a semantic-memory backend (optional). Each detects your environment and walks you through the setup. See `.claude/docs/memory-systems.md` to choose.
 
 ## Available Skills
+
+> Upstream skills only. Fork-specific skills (when this workspace tracks a fork) and
+> workspace-local skills are documented in their own overlays — see *Layered overlays*
+> at the foot of this file.
 
 | Skill | Purpose |
 |-------|---------|
@@ -119,14 +125,6 @@ To propose a skill improvement:
 4. **End**: `/bye` captures lessons, appends to brag log if warranted, and clears the session marker.
 5. **Sync** (periodic): `/setup-workspace sync` pulls upstream skill/agent updates.
 
-## Conventions
-
-<!-- Workspace-wide conventions you want loaded every session -->
-- Language:
-- Framework:
-- Test runner:
-- Formatting:
-
 ## Detailed Docs
 
 Refer to these files for more detail (use `@` to include them in context):
@@ -136,3 +134,11 @@ Refer to these files for more detail (use `@` to include them in context):
 - `.claude/docs/cognee-usage.md` — how to use cognee MCP tools
 - `.claude/docs/wikibase-migration-patterns.md` — patterns for the Wikibase provenance-graph backend
 - `.claude/docs/agent-guardrails.md` — agent behaviour by scope (universal / session / autonomous)
+
+## Layered overlays
+
+Configuration that layers on top of this base. Each file has a single owner, so `/setup-workspace sync` reconciles them per-file with no in-file merging:
+
+- **`CLAUDE.local.md`** — your personal workspace preferences (Conventions, local notes). Loaded natively by Claude Code alongside this file; seeded once at init; never synced, never overwritten.
+{{fork_overlay_include}}
+Overlays are additive — they extend this base, never contradict it.

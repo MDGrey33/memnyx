@@ -53,7 +53,11 @@ import shutil
 from pathlib import Path
 
 from _starter_maps import PROJECT_STARTERS, WORKSPACE_STARTERS
-from _common import die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL
+from _common import (
+    die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL,
+    classify_source, fork_overlay_active, fork_include_block, render_template,
+    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL,
+)
 import launcher  # launcher.write_memnyx_sh regenerates the mmn shell launcher on apply
 
 SOURCE_REF_REL = ".claude/.source"
@@ -267,6 +271,99 @@ def print_claude_md_memory_advisory(missing: list[Path]) -> None:
         print(f"  · {cm}")
 
 
+LAYERED_OVERLAYS_MARKER = "## Layered overlays"
+
+
+def render_base_claude_md(source: Path, workspace: Path) -> str:
+    c = render_template(source / BOILERPLATE_MARKER_REL, workspace)
+    return c.replace("{{fork_overlay_include}}", fork_include_block(source))
+
+
+def _safe_layer_write(dst: Path, content: str, label: str, actions: list[str]) -> None:
+    """Write a layer file, refusing a symlinked destination — mirrors the symlink
+    refusal apply_paths enforces, so sync never follows a link out of the workspace
+    and clobbers an external target."""
+    if dst.is_symlink():
+        actions.append(f"{label} — refused: {dst.name} is a symlink to {dst.resolve()}; remove the symlink and re-run")
+        return
+    dst.write_text(content)
+    actions.append(f"{label} — written")
+
+
+def reconcile_claude_layers(workspace: Path, source: Path, apply: bool) -> list[str]:
+    """Reconcile the three CLAUDE.md layers — kept separate from the file-copy
+    buckets because base/fork/local are generated from templates with substitution.
+
+      base   CLAUDE.md        overwritten from the rendered base template
+      fork   CLAUDE.fork.md   overwritten from the fork overlay template (forks only)
+      local  CLAUDE.local.md  seeded from its template if absent; never overwritten
+
+    Two guards protect ALL three layers (touch nothing if either trips):
+      * classification 'unknown' — the source's git origin can't be read, so we
+        can't tell canonical from fork; never guess (a transient failure must not
+        flip a canonical workspace into fork shape).
+      * legacy monolith — the base lacks the '## Layered overlays' marker; hold
+        every layer until the user runs the one-time split (else the local seed
+        would duplicate the monolith's Conventions and a fork overlay would be
+        written that nothing references).
+    """
+    actions: list[str] = []
+
+    kind = classify_source(source)  # cached: one git lookup per process
+    if kind == "unknown":
+        actions.append("layers — SKIPPED: source git origin unreadable; cannot classify canonical-vs-fork, base/fork/local left untouched")
+        return actions
+
+    base_dst = workspace / "CLAUDE.md"
+    if not base_dst.is_file():
+        actions.append("CLAUDE.md — missing; run init (sync does not create the base)")
+        return actions
+    existing = base_dst.read_text()
+    if LAYERED_OVERLAYS_MARKER not in existing:
+        actions.append("CLAUDE.md — SKIPPED: legacy monolithic (no '## Layered overlays'); run the one-time split first. Fork overlay + local seed held until then.")
+        return actions
+
+    # base
+    rendered = render_base_claude_md(source, workspace)
+    if existing == rendered:
+        actions.append("CLAUDE.md — unchanged (base)")
+    elif apply:
+        _safe_layer_write(base_dst, rendered, "CLAUDE.md (base)", actions)
+    else:
+        actions.append("CLAUDE.md — would overwrite (base differs)")
+
+    # fork overlay
+    fork_dst = workspace / "CLAUDE.fork.md"
+    if fork_overlay_active(source):
+        rendered_fork = render_template(source / FORK_OVERLAY_TEMPLATE_REL, workspace)
+        if fork_dst.is_file() and fork_dst.read_text() == rendered_fork:
+            actions.append("CLAUDE.fork.md — unchanged (fork overlay)")
+        elif apply:
+            _safe_layer_write(fork_dst, rendered_fork, "CLAUDE.fork.md (fork overlay)", actions)
+        else:
+            verb = "missing" if not fork_dst.is_file() else "differs"
+            actions.append(f"CLAUDE.fork.md — would overwrite (fork overlay; {verb})")
+    elif kind == "fork":
+        actions.append("CLAUDE.fork.md — source is a fork but ships no overlay template; base include suppressed")
+    elif fork_dst.is_file():
+        actions.append("CLAUDE.fork.md — ORPHANED: source is canonical and the base no longer references it; remove by hand if the source change was intended")
+
+    # local overlay — seed if missing, never overwrite (single owner: this reconciler)
+    local_dst = workspace / "CLAUDE.local.md"
+    if local_dst.is_file():
+        actions.append("CLAUDE.local.md — present; left untouched (user-owned)")
+    else:
+        seed = source / LOCAL_OVERLAY_SEED_REL
+        if not seed.is_file():
+            actions.append("CLAUDE.local.md — missing; no seed template in source")
+        elif apply:
+            _safe_layer_write(local_dst, render_template(seed, workspace), "CLAUDE.local.md (seeded)", actions)
+        else:
+            actions.append("CLAUDE.local.md — would seed (missing)")
+
+    return actions
+
+
 def print_plan(workspace: Path, source: Path, plan: dict, starter_plan: dict) -> None:
     print()
     print("=== sync plan ===")
@@ -391,6 +488,11 @@ def main() -> None:
 
     if not args.apply and not args.apply_all:
         print_plan(workspace, source, plan, starter_plan)
+        print("-- CLAUDE layers (base/fork generated from templates; local seeded-if-missing) --")
+        print("   (reconciled only on --apply-all, not on selective --apply)")
+        for action in reconcile_claude_layers(workspace, source, apply=False):
+            print(f"  {action}")
+        print()
         print_claude_md_memory_advisory(missing_includes)
         return
 
@@ -405,6 +507,8 @@ def main() -> None:
     launcher.write_memnyx_sh(workspace, dry_run=False)
     applied.append("shell/memnyx.sh (mmn launcher, regenerated)")
 
+    layer_actions = reconcile_claude_layers(workspace, source, apply=True) if args.apply_all else []
+
     print()
     print("=== sync apply ===")
     print(f"workspace: {workspace}")
@@ -413,6 +517,11 @@ def main() -> None:
     print(f"Applied ({len(applied)}):")
     for rel in applied:
         print(f"  + {rel}")
+    if layer_actions:
+        print()
+        print("CLAUDE layers:")
+        for action in layer_actions:
+            print(f"  {action}")
     if skipped:
         print()
         print(f"Skipped ({len(skipped)}):")
