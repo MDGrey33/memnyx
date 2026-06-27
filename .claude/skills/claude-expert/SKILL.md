@@ -155,8 +155,11 @@ plugins, attribution, sandbox, etc. Arrays merge across scopes. See
 Distributable bundles with a `.claude-plugin/plugin.json` manifest plus any
 of `skills/`, `agents/`, `hooks/`, `.mcp.json`, `.lsp.json`, `monitors/`,
 `bin/`, `settings.json`. Installed via marketplaces (`/plugin`) or loaded
-ad-hoc with `--plugin-dir`. Plugin skills are namespaced
-`/plugin-name:skill-name`. See [surfaces/plugins.md](surfaces/plugins.md).
+ad-hoc with `--plugin-dir`. Root-skill invocation depends on load form: a
+skills-directory plugin (`.claude/skills/<name>/`, autoloaded) resolves its root
+**bare** `/<name>`; a marketplace- or `--plugin-dir`-loaded plugin resolves it
+**namespaced** `/<plugin>:<name>`. Sub-skills and agents are always namespaced.
+See [surfaces/plugins.md](surfaces/plugins.md).
 
 ### Memory
 `CLAUDE.md` files (written by you) + auto-memory (written by Claude). Project
