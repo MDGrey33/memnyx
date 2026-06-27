@@ -39,7 +39,8 @@ with `.claude-plugin/plugin.json` plus any of:
 **Root-skill invocation depends on how the plugin is loaded.** A plugin's
 **root** skill — the plugin directory's own `SKILL.md`, registered via
 `"skills": ["./"]` (or auto-detected as a single-skill plugin) — resolves
-differently per load form. Resolve-and-observed on Claude Code 2.1.181 with a
+differently per load form. Resolve-and-observed on Claude Code 2.1.181
+(re-verified on 2.1.195) with a
 probe whose frontmatter `name` deliberately differed from its plugin/directory
 name (✅ = fired, ❌ = `Unknown command`):
 
@@ -68,9 +69,13 @@ directory name as a fallback —
 `name` is not set …, the directory basename is used as a fallback"); the
 single-skill-at-root form is auto-detected in CC ≥ 2.1.142. So a
 skills-directory deployment is invoked `/<name>`, while the same plugin shipped
-through a marketplace is `/<plugin>:<name>`. (Asking a session to *report* its
-identifier is unreliable — resolve-and-observe instead.) Re-verify against
-current docs — the CLI evolves.
+through a marketplace is `/<plugin>:<name>`. The official docs document the
+`@skills-dir` *manifest*
+([Plugins reference → *Skills-directory plugins*](https://code.claude.com/docs/en/plugins-reference#skills-directory-plugins))
+but not its root-skill *invocation* — so the bare-only behaviour here is verified
+empirically, not documented. (Asking a session to *report* its identifier is
+unreliable — resolve-and-observe instead.) Re-verify against current docs — the
+CLI evolves.
 
 ## Plugin vs standalone
 
