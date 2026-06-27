@@ -28,8 +28,8 @@ Project layout:
 │   ├── lessons-learned.md     # Raw lessons inbox (always loaded)
 │   └── project-context.md     # Domain context (always loaded)
 ├── docs/
-│   ├── architecture.md        # Project architecture (on-demand)
-│   └── conventions.md         # Code style and patterns (on-demand)
+│   ├── architecture.md        # Workspace project-architecture template, deployed by init (on-demand)
+│   └── conventions.md         # Workspace code-conventions template, deployed by init (on-demand)
 └── settings.json
 ```
 
@@ -111,12 +111,13 @@ To propose a skill improvement:
 ## Detailed Docs
 
 Refer to these files for more detail (use `@` to include them in context):
-- `.claude/docs/architecture.md` — Memnyx architecture
-- `.claude/docs/conventions.md` — code style and patterns
+- `docs/v2-design-principles.md` — Memnyx v2 architecture, lifecycle, and naming/conventions (the *what* and *why* of the v2 design)
 - `.claude/docs/memory-systems.md` — how to choose a semantic-memory backend (markdown / cognee / Wikibase)
 - `.claude/docs/cognee-usage.md` — how to use cognee MCP tools for semantic memory
 - `.claude/docs/wikibase-migration-patterns.md` — patterns for the Wikibase provenance-graph backend
 - `.claude/docs/agent-guardrails.md` — operational rules for agents working in this repo
+
+`.claude/docs/architecture.md` and `.claude/docs/conventions.md` are **not** Memnyx docs — they ship as empty templates that `init` deploys into each workspace for the user's *own* project. Memnyx's own architecture and conventions live in `docs/v2-design-principles.md`.
 
 ## Keeping docs in sync
 
@@ -130,6 +131,6 @@ Refer to these files for more detail (use `@` to include them in context):
 | A template under `.claude/skills/setup-workspace/templates/` | the template itself; and if structural, `init.py` or `add_project.py` `STARTER_MAP` |
 | Added / removed / renamed an **agent** | `README.md` and this `CLAUDE.md` (note the agent where relevant; agents live in `.claude/agents/`, deployed + synced like skills) |
 | An agent operating rule | `.claude/docs/agent-guardrails.md` (overwritten by `init` and `sync` — Memnyx is the canonical source) |
-| Architecture, lifecycle, or skill-chain wiring | `.claude/docs/architecture.md` |
-| Code style, file organisation, naming patterns | `.claude/docs/conventions.md` |
+| Architecture, lifecycle, or skill-chain wiring | `docs/v2-design-principles.md` |
+| Code style, file organisation, naming patterns | `docs/v2-design-principles.md` (`## Naming`, `## Skill authoring principles`) |
 | A new doc surface | the row above for that surface, and this table |
