@@ -96,6 +96,31 @@ def render_template(path: Path, workspace: Path) -> str:
     )
 
 
+def layer_symlink_refusal(dst: Path) -> str | None:
+    """The refusal reason if dst is a symlink, else None. A layer write must never
+    follow a symlink out of the workspace and clobber an external target; callers
+    consult this BEFORE any existence check or write, because Path.exists() is False
+    for a dangling symlink. Returns the bare reason — init and sync wrap it in their
+    own skipped/actions phrasing — so the is_symlink rule lives in one place."""
+    if dst.is_symlink():
+        return f"{dst.name} is a symlink to {dst.resolve()}; remove the symlink and re-run"
+    return None
+
+
+def base_is_layered(dst: Path) -> bool | None:
+    """Whether the base CLAUDE.md at dst carries LAYERED_OVERLAYS_MARKER. None when
+    that can't be determined — dst is absent, not a regular file, or unreadable /
+    non-UTF-8 — so a legacy non-UTF-8 base never crashes a caller; the caller
+    decides how to treat the unknown. One definition of 'is the base layered?',
+    shared by init's overlay gate and sync's layer reconciliation."""
+    if not dst.is_file():
+        return None
+    try:
+        return LAYERED_OVERLAYS_MARKER in dst.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
 def _normalize_repo(url: str) -> str:
     """Reduce a git remote URL to a lowercase `owner/repo`, ignoring protocol,
     host, and a trailing `.git` (handles both https and scp-style ssh URLs)."""

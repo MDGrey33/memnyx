@@ -56,7 +56,8 @@ from _starter_maps import PROJECT_STARTERS, WORKSPACE_STARTERS
 from _common import (
     die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL,
     classify_source, fork_overlay_active, fork_include_block, render_template,
-    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL, LAYERED_OVERLAYS_MARKER,
+    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL,
+    layer_symlink_refusal, base_is_layered,
 )
 import launcher  # launcher.write_memnyx_sh regenerates the mmn shell launcher on apply
 
@@ -280,8 +281,9 @@ def _safe_layer_write(dst: Path, content: str, label: str, actions: list[str]) -
     """Write a layer file, refusing a symlinked destination — mirrors the symlink
     refusal apply_paths enforces, so sync never follows a link out of the workspace
     and clobbers an external target."""
-    if dst.is_symlink():
-        actions.append(f"{label} — refused: {dst.name} is a symlink to {dst.resolve()}; remove the symlink and re-run")
+    reason = layer_symlink_refusal(dst)
+    if reason:
+        actions.append(f"{label} — refused: {reason}")
         return
     dst.write_text(content, encoding="utf-8")
     actions.append(f"{label} — written")
@@ -315,10 +317,10 @@ def reconcile_claude_layers(workspace: Path, source: Path, apply: bool) -> list[
     if not base_dst.is_file():
         actions.append("CLAUDE.md — missing; run init (sync does not create the base)")
         return actions
-    existing = base_dst.read_text(encoding="utf-8")
-    if LAYERED_OVERLAYS_MARKER not in existing:
-        actions.append("CLAUDE.md — SKIPPED: legacy monolithic (no '## Layered overlays'); run the one-time split first. Fork overlay + local seed held until then.")
+    if not base_is_layered(base_dst):
+        actions.append("CLAUDE.md — SKIPPED: legacy monolithic, unreadable, or non-UTF-8 base (no '## Layered overlays'); run the one-time split first. Fork overlay + local seed held until then.")
         return actions
+    existing = base_dst.read_text(encoding="utf-8")
 
     # base
     rendered = render_base_claude_md(source, workspace)
@@ -434,8 +436,9 @@ def apply_paths(
         if path in synced_eligible:
             src = source / path
             dst = workspace / path
-            if dst.is_symlink():
-                skipped.append(f"{path} (refused: dst is a symlink to {dst.resolve()}; remove the symlink and re-run)")
+            reason = layer_symlink_refusal(dst)
+            if reason:
+                skipped.append(f"{path} (refused: {reason})")
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
@@ -443,8 +446,9 @@ def apply_paths(
         elif path in starter_eligible:
             src = starter_plan["sources"][path]
             dst = starter_plan["dests"][path]
-            if dst.is_symlink():
-                skipped.append(f"{path} (refused: dst is a symlink to {dst.resolve()}; remove the symlink and re-run)")
+            reason = layer_symlink_refusal(dst)
+            if reason:
+                skipped.append(f"{path} (refused: {reason})")
                 continue
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dst)
@@ -481,8 +485,6 @@ def main() -> None:
     plan = build_plan(workspace, source)
     starter_plan = build_starter_plan(workspace, source)
 
-    missing_includes = claude_md_missing_memory_include(workspace)
-
     if not args.apply and not args.apply_all:
         print_plan(workspace, source, plan, starter_plan)
         print("-- CLAUDE layers (base/fork generated from templates; local seeded-if-missing) --")
@@ -490,7 +492,7 @@ def main() -> None:
         for action in reconcile_claude_layers(workspace, source, apply=False):
             print(f"  {action}")
         print()
-        print_claude_md_memory_advisory(missing_includes)
+        print_claude_md_memory_advisory(claude_md_missing_memory_include(workspace))
         return
 
     if args.apply_all:
