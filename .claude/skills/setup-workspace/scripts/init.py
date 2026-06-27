@@ -57,7 +57,7 @@ from _starter_maps import WORKSPACE_STARTERS as STARTER_MAP  # noqa: E402
 from _common import (  # noqa: E402
     die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL,
     fork_include_block, source_is_fork, render_template,
-    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL,
+    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL, LAYERED_OVERLAYS_MARKER,
 )
 import launcher  # noqa: E402  — launcher.write_memnyx_sh writes the mmn shell launcher
 
@@ -261,9 +261,38 @@ def deploy_settings(source: Path, created: list, skipped: list) -> None:
     created.append(".claude/settings.json")
 
 
+def refuse_layer_symlink(dst: Path, label: str, skipped: list) -> bool:
+    """Refuse a symlinked layer destination, mirroring sync's apply_paths guard, so
+    init never follows a link out of the workspace and clobbers an external target.
+    Path.exists() is False for a dangling symlink, so this must run BEFORE the
+    existence check, not after."""
+    if dst.is_symlink():
+        skipped.append(f"{label} (refused: dst is a symlink to {dst.resolve()}; remove the symlink and re-run)")
+        return True
+    return False
+
+
+def claude_base_allows_overlays() -> bool:
+    """Whether overlay seeding is safe — true only when the base CLAUDE.md is (or
+    will be) layered. A symlinked base is refused by generate_claude_md, so don't
+    seed against it; a legacy monolith (no marker) would get a duplicated local seed
+    and an unreferenced fork overlay, so hold both until the one-time split. A
+    missing base is fine: generate_claude_md creates it layered."""
+    dst = workspace() / "CLAUDE.md"
+    if dst.is_symlink():
+        return False
+    if not dst.exists():
+        return True
+    if not dst.is_file():
+        return False
+    return LAYERED_OVERLAYS_MARKER in dst.read_text(encoding="utf-8")
+
+
 def generate_claude_md(source: Path, created: list, skipped: list) -> None:
     template = source / BOILERPLATE_MARKER_REL
     dst = workspace() / "CLAUDE.md"
+    if refuse_layer_symlink(dst, "CLAUDE.md", skipped):
+        return
     if dst.exists():
         skipped.append("CLAUDE.md (exists)")
         return
@@ -272,7 +301,7 @@ def generate_claude_md(source: Path, created: list, skipped: list) -> None:
     if not is_dry_run():
         content = render_template(template, workspace())
         content = content.replace("{{fork_overlay_include}}", fork_include_block(source))
-        dst.write_text(content)
+        dst.write_text(content, encoding="utf-8")
     created.append("CLAUDE.md")
 
 
@@ -288,11 +317,13 @@ def deploy_fork_overlay(source: Path, created: list, skipped: list) -> None:
         skipped.append("CLAUDE.fork.md (source is a fork but ships no overlay template)")
         return
     dst = workspace() / "CLAUDE.fork.md"
+    if refuse_layer_symlink(dst, "CLAUDE.fork.md", skipped):
+        return
     if dst.exists():
         skipped.append("CLAUDE.fork.md (exists)")
         return
     if not is_dry_run():
-        dst.write_text(render_template(template, workspace()))
+        dst.write_text(render_template(template, workspace()), encoding="utf-8")
     created.append("CLAUDE.fork.md")
 
 
@@ -301,6 +332,8 @@ def seed_local_overlay(source: Path, created: list, skipped: list) -> None:
     by Claude Code alongside CLAUDE.md; never overwritten. Managed here (not via the
     generic starter walk) so sync can gate seeding on the base being layered."""
     dst = workspace() / "CLAUDE.local.md"
+    if refuse_layer_symlink(dst, "CLAUDE.local.md", skipped):
+        return
     if dst.exists():
         skipped.append("CLAUDE.local.md (exists)")
         return
@@ -309,7 +342,7 @@ def seed_local_overlay(source: Path, created: list, skipped: list) -> None:
         skipped.append("CLAUDE.local.md (no seed template in source)")
         return
     if not is_dry_run():
-        dst.write_text(render_template(seed, workspace()))
+        dst.write_text(render_template(seed, workspace()), encoding="utf-8")
     created.append("CLAUDE.local.md")
 
 
@@ -413,9 +446,15 @@ def main() -> None:
     deploy_agent_guardrails(source, created, skipped)
     deploy_other_docs(source, created, skipped)
     deploy_settings(source, created, skipped)
+    # Capture before generate_claude_md creates the base: overlays seed only when
+    # the base is (or will be) layered — a legacy monolith holds them until split.
+    base_allows_overlays = claude_base_allows_overlays()
     generate_claude_md(source, created, skipped)
-    deploy_fork_overlay(source, created, skipped)
-    seed_local_overlay(source, created, skipped)
+    if base_allows_overlays:
+        deploy_fork_overlay(source, created, skipped)
+        seed_local_overlay(source, created, skipped)
+    else:
+        skipped.append("CLAUDE overlays (existing CLAUDE.md is not layered — run the one-time split first)")
     deploy_starters(source, created, skipped)
     write_launcher(created, skipped)
     print_summary(source, created, skipped)

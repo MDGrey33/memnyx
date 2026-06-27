@@ -81,12 +81,16 @@ FORK_OVERLAY_INCLUDE_BLOCK = (
     "overwritten from source on sync.\n\n@CLAUDE.fork.md\n"
 )
 
+# Marks a base CLAUDE.md as layered (vs a legacy monolith). Both init and sync gate
+# overlay seeding on its presence, so it lives here, shared by one definition.
+LAYERED_OVERLAYS_MARKER = "## Layered overlays"
+
 
 def render_template(path: Path, workspace: Path) -> str:
     """Substitute the workspace placeholders in a template's text. One renderer
     shared by init and sync, so the base/fork/local files render identically."""
     return (
-        path.read_text()
+        path.read_text(encoding="utf-8")
         .replace("{{workspace_name}}", workspace.name)
         .replace("{{workspace_path}}", str(workspace))
     )

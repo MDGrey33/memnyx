@@ -56,7 +56,7 @@ from _starter_maps import PROJECT_STARTERS, WORKSPACE_STARTERS
 from _common import (
     die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL,
     classify_source, fork_overlay_active, fork_include_block, render_template,
-    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL,
+    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL, LAYERED_OVERLAYS_MARKER,
 )
 import launcher  # launcher.write_memnyx_sh regenerates the mmn shell launcher on apply
 
@@ -253,7 +253,7 @@ def claude_md_missing_memory_include(workspace: Path) -> list[Path]:
         if not cm.is_file():
             continue
         try:
-            if CLAUDE_MD_MEMORY_INCLUDE not in cm.read_text():
+            if CLAUDE_MD_MEMORY_INCLUDE not in cm.read_text(encoding="utf-8"):
                 missing.append(cm)
         except OSError:
             continue
@@ -271,9 +271,6 @@ def print_claude_md_memory_advisory(missing: list[Path]) -> None:
         print(f"  · {cm}")
 
 
-LAYERED_OVERLAYS_MARKER = "## Layered overlays"
-
-
 def render_base_claude_md(source: Path, workspace: Path) -> str:
     c = render_template(source / BOILERPLATE_MARKER_REL, workspace)
     return c.replace("{{fork_overlay_include}}", fork_include_block(source))
@@ -286,7 +283,7 @@ def _safe_layer_write(dst: Path, content: str, label: str, actions: list[str]) -
     if dst.is_symlink():
         actions.append(f"{label} — refused: {dst.name} is a symlink to {dst.resolve()}; remove the symlink and re-run")
         return
-    dst.write_text(content)
+    dst.write_text(content, encoding="utf-8")
     actions.append(f"{label} — written")
 
 
@@ -318,7 +315,7 @@ def reconcile_claude_layers(workspace: Path, source: Path, apply: bool) -> list[
     if not base_dst.is_file():
         actions.append("CLAUDE.md — missing; run init (sync does not create the base)")
         return actions
-    existing = base_dst.read_text()
+    existing = base_dst.read_text(encoding="utf-8")
     if LAYERED_OVERLAYS_MARKER not in existing:
         actions.append("CLAUDE.md — SKIPPED: legacy monolithic (no '## Layered overlays'); run the one-time split first. Fork overlay + local seed held until then.")
         return actions
@@ -336,7 +333,7 @@ def reconcile_claude_layers(workspace: Path, source: Path, apply: bool) -> list[
     fork_dst = workspace / "CLAUDE.fork.md"
     if fork_overlay_active(source):
         rendered_fork = render_template(source / FORK_OVERLAY_TEMPLATE_REL, workspace)
-        if fork_dst.is_file() and fork_dst.read_text() == rendered_fork:
+        if fork_dst.is_file() and fork_dst.read_text(encoding="utf-8") == rendered_fork:
             actions.append("CLAUDE.fork.md — unchanged (fork overlay)")
         elif apply:
             _safe_layer_write(fork_dst, rendered_fork, "CLAUDE.fork.md (fork overlay)", actions)
@@ -508,6 +505,9 @@ def main() -> None:
     applied.append("shell/memnyx.sh (mmn launcher, regenerated)")
 
     layer_actions = reconcile_claude_layers(workspace, source, apply=True) if args.apply_all else []
+    # --apply-all may have restored the @MEMORY include while rewriting the base, so
+    # recompute the advisory off post-apply state, not the pre-apply snapshot above.
+    missing_includes = claude_md_missing_memory_include(workspace)
 
     print()
     print("=== sync apply ===")
