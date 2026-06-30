@@ -59,8 +59,16 @@ name (✅ = fired, ❌ = `Unknown command`):
   directory-name skill, with no namespaced alias.
 - **Marketplace / `--plugin-dir`** → root is **namespaced** `/<plugin>:<name>`
   (bare `/<name>`, the frontmatter name, also resolves); `Skills: 1`.
-- **Sub-skills** (under `skills/<sub>/`) and **agents** always carry the
-  `<plugin>:` prefix in every form (an agent dispatches as `<plugin>:<agent>`).
+- **Agents** always carry the `<plugin>:` prefix in every form (an agent
+  dispatches as `<plugin>:<agent>`).
+- **Sub-skills** (under `skills/<sub>/`) are the exception: under bare
+  `@skills-dir` they do **not register at all** — not user-invocable (`/<sub>`
+  or `/<plugin>:<sub>`), not Skill-tool-invocable from the root, no namespaced
+  alias — **even when explicitly listed in `plugin.json`'s `skills` array, and
+  whether or not a `./` root is present** (a root-less manifest registers no bare
+  command at all). They register only via marketplace / `--plugin-dir`, namespaced
+  `/<plugin>:<sub>`. Verified on Claude Code 2.1.196 by two-variant
+  resolve-and-observe: mixed root+sub, and sub-only.
 
 The bare name / namespaced suffix comes from frontmatter `name`, with the plugin
 directory name as a fallback —
@@ -283,7 +291,7 @@ plugin enabled.
   only as a skills-directory plugin (`@skills-dir`); via marketplace or
   `--plugin-dir` it is **namespaced** `/<plugin>:<name>` (bare `/<name>` also
   resolves there, but `/<plugin>:<name>` does **not** resolve under
-  `@skills-dir`). Sub-skills and agents are always namespaced (`/<plugin>:<name>`).
+  `@skills-dir`). **Agents** are always namespaced (`/<plugin>:<agent>`) in every form. **Sub-skills** are namespaced only via marketplace / `--plugin-dir`; under bare `@skills-dir` they do **not register at all** (verified CC 2.1.196).
 - Plugin `settings.json` only honors `agent` and `subagentStatusLine` as of
   docs-read (docs may expand this — verify current list).
 - Plugin-provided subagent `hooks`, `mcpServers`, `permissionMode` silently
