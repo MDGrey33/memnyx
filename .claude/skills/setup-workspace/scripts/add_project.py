@@ -197,6 +197,9 @@ def extract_template_section(template_text: str, heading: str) -> str | None:
 def generate_claude_md(
     slug: str, description: str, created: list, skipped: list, patched: list
 ) -> None:
+    """Generate a fresh CLAUDE.md from the template, or — if one already exists —
+    leave it untouched (already wired / has its own unrelated Memory heading)
+    or surgically patch in just the template's Memory section."""
     template = workspace() / PROJECT_TEMPLATE_REL
     dst = project_dir(slug) / "CLAUDE.md"
     if not template.is_file():
