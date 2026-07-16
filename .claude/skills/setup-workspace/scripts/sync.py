@@ -53,7 +53,13 @@ import shutil
 from pathlib import Path
 
 from _starter_maps import PROJECT_STARTERS, WORKSPACE_STARTERS
-from _common import die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL
+from _common import (
+    die,
+    is_v2_boilerplate,
+    resolve_workspace,
+    BOILERPLATE_MARKER_REL,
+    CLAUDE_MD_MEMORY_INCLUDE,
+)
 import launcher  # launcher.write_memnyx_sh regenerates the mmn shell launcher on apply
 
 SOURCE_REF_REL = ".claude/.source"
@@ -229,9 +235,6 @@ def build_starter_plan(workspace: Path, source: Path) -> dict:
         "sources": sources,
         "dests": dests,
     }
-
-
-CLAUDE_MD_MEMORY_INCLUDE = "@.claude/memory/MEMORY.md"
 
 
 def claude_md_missing_memory_include(workspace: Path) -> list[Path]:

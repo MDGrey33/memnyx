@@ -121,12 +121,13 @@ Scaffold a project under `<workspace>/projects/<slug>/` and register it via `/pr
 
 ### Dry run
 
-Pass `--dry-run` to preview what would be created/skipped without writing anything. Particularly useful when the project dir is a symlink to an existing repo: confirms whether an existing `CLAUDE.md` or `.gitignore` would be preserved, and which gitignore patterns would be appended.
+Pass `--dry-run` to preview what would be created/skipped/patched without writing anything. Particularly useful when the project dir is a symlink to an existing repo: confirms whether an existing `CLAUDE.md` or `.gitignore` would be preserved (or surgically patched) as-is, and which gitignore patterns would be appended.
 
 ### Behavior
 
 The action is **idempotent**. Re-running is safe:
-- Existing files (`CLAUDE.md`, `MEMORY.md`, `lessons-learned.md`, `project-context.md`, `settings.json`) are preserved — never overwritten.
+- Existing starter files (`MEMORY.md`, `lessons-learned.md`, `project-context.md`, `settings.json`) are preserved — never overwritten.
+- A pre-existing `CLAUDE.md` (typical when symlinking to a real repo that already has its own) is never regenerated or overwritten. If it already has the `@.claude/memory/MEMORY.md` include, it's left untouched. If not, the `## Memory` section is surgically appended from the template — the rest of the file is preserved verbatim. Re-running is safe: the include-marker check means the section is never appended twice.
 - `.gitignore` is created fresh if missing, or appended in-place with only the patterns it lacks (line-by-line check).
 - `/project-registry add` is skipped when the slug is already registered.
 
@@ -142,10 +143,13 @@ The action is **idempotent**. Re-running is safe:
    - `.claude/memory/lessons-learned.md` — empty header.
    - `.claude/memory/project-context.md` — project-level domain context template (user fills in: business domain, users, constraints, what "done" looks like).
    - `.claude/settings.json` — empty `{}`. Project-level allowlists evolve here as the project's needs surface; user-specific layers go into `settings.local.json` (gitignored).
-4. **Generate `CLAUDE.md`** from `templates/project-CLAUDE.md.tmpl` with `{{project_name}}` and `{{description}}` substituted. Skip if exists (typical when symlinking to a real repo that already has its own CLAUDE.md).
+4. **Generate or patch `CLAUDE.md`** from `templates/project-CLAUDE.md.tmpl` with `{{project_name}}` and `{{description}}` substituted.
+   - No existing file → generate the full template.
+   - Existing file, already has `@.claude/memory/MEMORY.md` → skip, untouched.
+   - Existing file, missing the include → surgically append just the template's `## Memory` section (extracted up to its next heading) to the end of the file. Everything already in the file is preserved verbatim.
 5. **Update `.gitignore`** at the project root: append `workstreams/`, `sessions/`, `collected/`, `artifacts/`, `contributions/`. Idempotent — line-by-line check; only missing patterns are added.
 6. **Register via `/project-registry add`** — the registry receives `<slug> [description]`. Skipped when the slug is already registered.
-7. **Print summary:** what was created, what was skipped.
+7. **Print summary:** what was created, what was patched, what was skipped.
 
 ### Why `collected/` and `contributions/` aren't scaffolded
 
