@@ -51,6 +51,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 | `/collect-team-activity` | Manual | Collect a team member's daily activity (leadership roles) |
 | `/one-on-one-prep` | Manual | Synthesize a member's activity into 1:1 meeting prep |
 | `/log` | Auto (via skills) | Append structured entry to agent log |
+| `/todo` | Manual | Persistent task list that survives across sessions — staleness detection, priority decay, blocked detection. Markdown-only, no MCP dependency. Canonical file at `<workspace>/.claude/memory/todo/TODO.md`. |
 | `/contribute` | Manual | Generalize a lesson and stage it in `<workspace>/contributions/` |
 | `/pull-contributions` | Manual (from Memnyx repo) | Pull staged contributions from a project into Memnyx |
 | `/setup-cognee` | Manual | Install and configure cognee-mcp on this machine (semantic-memory backend option) |
@@ -61,11 +62,15 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 | `/scribe` | Manual | Generate or maintain a project's Claude-facing docs (`CLAUDE.md`, `.claude/docs/*`, project-context, README) from verified facts. `--deep` adds per-subsystem `scribe-explorer` exploration plus an independent `scribe-verifier` pass; unconfirmed claims go to a hazards artifact. Packaged as a skills-directory plugin (`scribe@skills-dir`), bundling its two agents. |
 | `/setup-auto-memory` | Manual | Wire in the optional auto-memory system (typed atomic files in `~/.claude/projects/<slug>/memory/`). See `auto-memory/README.md`. |
 | `/setup-playwright-mcp` | Manual | Install and configure Playwright MCP for browser automation |
+| `/setup-aws-mcp` | Manual | Install and configure the managed AWS MCP Server (via the `mcp-proxy-for-aws` stdio proxy) for read-only AWS access. Supersedes the deprecated `awslabs.aws-api-mcp-server`. |
 | `/research` | Manual | Unified research with three depth modes — `--shallow` (single-pass parallel web search via the `research-expert` agent), `--standard` (decompose → parallel subagents → synthesize → cite-check), `--deep` (9-stage pipeline: breadth, depth, gap-fill, contradiction detection, theory, fact-check, tiered output). Replaces the former `deep-research-orchestrator`. |
 | `/setup-voice` | Manual | Install a local, offline neural voice interface (macOS Apple Silicon) — mlx-whisper (STT) + Kokoro TTS wired into `voice-claude` / `vtranscribe` CLI scripts. No cloud APIs. |
 | `/say-it` | Manual | Speak content aloud via Kokoro neural TTS (local, offline) |
 | `/prepare-for-audio` | Auto (via `/say-it` and any voice-output channel) or manual | Shared TTS-ready text cleaner — strips markdown so a TTS engine never speaks "asterisk asterisk", and in voice mode drops emoji too. One cleaner reused by every channel that speaks text aloud. |
+| `/humanise` | Manual | Rewrite text so it reads like a person wrote it, not an LLM — strips AI tells (em-dash overuse, "not just X, it's Y", rule-of-three, corporate diction, hedging, mechanical transitions) while preserving meaning. Register-aware (Slack, internal email, external email, formal doc, marketing); pairs a deterministic tell-detector script with a judgment-based rewrite. |
 | `/linkedin-pitch-deflector` | Manual | Sweep unread LinkedIn DMs — deflect cold sales pitches, socially probe ambiguous openers, hand genuine threads back to you. Drives logged-in Chrome via the chrome-control MCP. |
+| `/cmux-control` | Manual | Deterministic playbook for controlling and introspecting cmux terminal tabs and the Claude Code sessions inside them — enumerate tabs, inject text/commands, read a tab's output, launch/drive a session, inspect Claude internals (turn-state, session id, transcript), and the always-on externally-streamable session pattern. |
+| `/cmux-browse` | Manual | Drive a real web browser via cmux's built-in snapshot-driven browser automation — navigate, read via accessibility snapshots, click/fill/select forms, attach files, log in via cookies/profile import, screenshot, and submit. Use instead of a permission-gated browser MCP for autonomous form-fill work (job applications, ATS portals, dashboards). |
 | `/google-script-deploy` | Called by other skills, or manual | Deploy an HTML file as a Google Apps Script web app with a stable URL — handles clasp install, auth, project creation, and in-place redeploys. Per-directory config in `clasp-projects.json`; no global state. |
 | `/security-snapshot` | Manual (monthly or on demand) | Full security pipeline — AWS Inspector V2 + GitHub security alerts → cross-source correlation → self-contained HTML dashboard with trend history. Org/profile/region configured per-workspace in `scripts/config.local.json` (gitignored; overlays the committed template; first run prompts). Dated snapshots for delta tracking. |
 
@@ -76,6 +81,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 /bye ──> /lessons ──> /skills-manager
 /setup-cognee ──> /mcp-doctor
 /setup-playwright-mcp ──> /mcp-doctor
+/setup-aws-mcp ──> /mcp-doctor --deep (deep: server can't load until restart)
 /contribute ──> /sanitizer (blocks staging on any finding)
 /pull-contributions ──> /sanitizer --check (blocks pull on any finding)
 /scribe ──> /sanitizer (blocks on findings in generated docs)
