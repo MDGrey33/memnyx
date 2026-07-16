@@ -107,7 +107,7 @@ transcript jsonl (§6) — the screen is lossy (truncated/wrapped), the jsonl is
 ## 5. Launch & control a Claude Code session  (args: `launch`)
 
 cmux takes **no** Claude flags of its own — you hand it a full claude command line.
-**For which claude flags are valid interactive vs headless, see the `claude-cli-flags` skill.**
+**For which claude flags are valid interactive vs headless, see the Claude Code CLI reference documentation (`claude --help`, or https://docs.claude.com/en/docs/claude-code).**
 ```bash
 # new always-on claude in its own workspace:
 $CMUX new-workspace --name "cc-live" --cwd "$HOME" \
