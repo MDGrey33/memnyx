@@ -37,7 +37,7 @@ Read all in parallel; skip silently if a file is missing:
 
 Read the project registry directly from `<workspace>/.claude/projects-index.json` (registry mutations go via `/project-registry`; reads bypass it). Treat missing as empty.
 
-Session narrative for the active workstream loads after workstream resolution at step 11 — not here.
+Session narrative for the active workstream loads after workstream resolution at step 10 — not here.
 
 ### 4. Scan active session markers
 
@@ -46,7 +46,7 @@ List markers from:
 - `<workspace>/sessions/active/*.md` (workspace-level sessions)
 - `<workspace>/projects/*/sessions/active/*.md` (project-level sessions)
 
-For each, parse frontmatter (`project_slug`, `workstream_slug`, `open_item_slug`, `started_at`) and compute age. **Held purely for the recap at step 6** — informational only. No control-flow consumer in this skill; disambiguation work happens in step 12 against a workstream-local scan, not against this list.
+For each, parse frontmatter (`project_slug`, `workstream_slug`, `open_item_slug`, `started_at`) and compute age. **Held purely for the recap at step 6** — informational only. No control-flow consumer in this skill; disambiguation work happens in step 11 against a workstream-local scan, not against this list.
 
 ### 5. Run /mcp-doctor
 
@@ -107,19 +107,15 @@ Read in parallel; skip silently if missing:
 - `<workspace>/projects/<slug>/.claude/memory/lessons-learned.md`
 - `<workspace>/projects/<slug>/.claude/memory/project-context.md`
 
-List `<workspace>/projects/<slug>/workstreams/*.md` (read on demand at step 11).
+List `<workspace>/projects/<slug>/workstreams/*.md` (read on demand at step 10).
 
 **These reads are load-bearing beyond memory.** Reading a file under `<workspace>/projects/<slug>/` triggers Claude Code's on-demand discovery of that project's `.claude/skills/`, registering them as invocable skills (autocomplete included) for the rest of the session. Do not replace these reads with cached or pre-aggregated content — the discovery side effect is part of this step's contract. Discovery covers the skills format only; legacy `.claude/commands/` files in a project never register this way (they load when the session starts in that project, or via an explicit `--add-dir`/`/add-dir` — never on-demand).
 
 For workspace-level scope, the equivalents at `<workspace>/.claude/memory/` are already loaded in step 3; just list `<workspace>/workstreams/*.md`.
 
-Session narrative for the active workstream loads after workstream resolution at step 11.
+Session narrative for the active workstream loads after workstream resolution at step 10.
 
-### 10. Cognee semantic search (conditional no-op)
-
-If cognee is loaded (per /mcp-doctor's report), call `cognee_search "project context recent work"` and fold useful findings into the recap. If cognee is not loaded, skip silently.
-
-### 11. Resolve workstream
+### 10. Resolve workstream
 
 To seed the hint: list `<scope>/sessions/*.md`, parse `<YYYY-MM-DD>` and `<HHMMSS>` from each filename, sort by parsed datetime descending, take the most recent. Extract the workstream slug from the filename (`<YYYY-MM-DD>-<workstream-slug>-<HHMMSS>-<6hex>.md` — the slug is the middle segment between the date and the timestamp). If no session files exist, skip the hint.
 
@@ -147,13 +143,13 @@ Resolution:
 - Always join the sanitised slug to `<scope>/workstreams/` (never concatenate raw user input into a path).
 - Fail with a validation prompt if the input cannot be safely normalised.
 
-### 12. Check for an existing active marker on this workstream
+### 11. Check for an existing active marker on this workstream
 
 Now that scope and workstream are known, scan `<scope>/sessions/active/*-<workstream-slug>-*.md` — workstream-local only. No cross-scope scan; step 6's recap already surfaced cross-scope sessions for the user's awareness, and acting on those is the user's decision, not this skill's.
 
 Branches by count:
 
-- **0 matches** → proceed to step 13.
+- **0 matches** → proceed to step 12.
 - **1 match** → parse the marker's frontmatter. Show:
 
    ```
@@ -165,12 +161,12 @@ Branches by count:
    Resume that work, or start fresh?
    ```
 
-   - **Resume** → adopt the marker as this session's marker. Load `open_item_slug` and `open_item_summary` from the frontmatter. **Cross-reference against the workstream file's open checkboxes — if the marker's `open_item_slug` maps to an item already marked `[x]`, the marker is stale; prompt the user to pick the live work from the workstream's `- [ ]` list before adopting.** Write `resumed_at: <ISO-8601 with TZ offset>` into the marker's frontmatter — add the field if missing, replace if present (only the most recent resume is tracked, no history list). Use mtime-check on this write since a concurrent `/hello` on the same marker could in principle race. **Skip step 13 (open-item resolution) and step 14 (marker write).** Record the resume decision for the final recap.
-   - **Fresh** → proceed to step 13. The prior marker stays in `active/` untouched — we do not auto-promote, auto-delete, or auto-modify. Flag it in step 15's recap so the user can decide what to do with it.
+   - **Resume** → adopt the marker as this session's marker. Load `open_item_slug` and `open_item_summary` from the frontmatter. **Cross-reference against the workstream file's open checkboxes — if the marker's `open_item_slug` maps to an item already marked `[x]`, the marker is stale; prompt the user to pick the live work from the workstream's `- [ ]` list before adopting.** Write `resumed_at: <ISO-8601 with TZ offset>` into the marker's frontmatter — add the field if missing, replace if present (only the most recent resume is tracked, no history list). Use mtime-check on this write since a concurrent `/hello` on the same marker could in principle race. **Skip step 12 (open-item resolution) and step 13 (marker write).** Record the resume decision for the final recap.
+   - **Fresh** → proceed to step 12. The prior marker stays in `active/` untouched — we do not auto-promote, auto-delete, or auto-modify. Flag it in step 14's recap so the user can decide what to do with it.
 
-- **>1 matches** → list each candidate with age + open item summary. Ask the user to pick one to resume, or to start fresh. Apply the same downstream branches as the 1-match case. Any unrescued candidates are surfaced in step 15.
+- **>1 matches** → list each candidate with age + open item summary. Ask the user to pick one to resume, or to start fresh. Apply the same downstream branches as the 1-match case. Any unrescued candidates are surfaced in step 14.
 
-### 13. Resolve open item (conflict unit)
+### 12. Resolve open item (conflict unit)
 
 Read the workstream file. Find checkbox lines (`- [ ] ...`).
 
@@ -181,11 +177,11 @@ Either:
 
 Ask explicitly: "Which open item are you tackling? (Or is this a new one not yet on the list?)" Do NOT add new items to the workstream file — `/bye` writes that on session close.
 
-**If the user defers answering** (redirects to loading context, asks a clarifying question, or gives a non-answer), hold steps 13 and 14 open. When the first concrete work signal arrives — any request to produce, modify, investigate, or write something — re-ask the open-item question and complete step 14 before starting that work. Never begin substantive work without a written marker.
+**If the user defers answering** (redirects to loading context, asks a clarifying question, or gives a non-answer), hold steps 12 and 13 open. When the first concrete work signal arrives — any request to produce, modify, investigate, or write something — re-ask the open-item question and complete step 13 before starting that work. Never begin substantive work without a written marker.
 
-### 14. Write the session marker
+### 13. Write the session marker
 
-**Skip this step if step 12 resolved to *Resume*** — the existing marker is the session's marker; no fresh write needed.
+**Skip this step if step 11 resolved to *Resume*** — the existing marker is the session's marker; no fresh write needed.
 
 Path:
 
@@ -211,9 +207,9 @@ Active session marker. Promoted to sessions/ by /bye on session close.
 
 Atomic write. No mtime-check — the id is unique by construction, no race.
 
-**Optional field — `resumed_at`**: step 12's Resume branch later adds this to an adopted marker. Absence means the marker was never resumed. `/bye` step 3 surfaces it in the session narrative when present.
+**Optional field — `resumed_at`**: step 11's Resume branch later adds this to an adopted marker. Absence means the marker was never resumed. `/bye` step 3 surfaces it in the session narrative when present.
 
-### 15. Final recap
+### 14. Final recap
 
 ```
 Active context
@@ -237,5 +233,4 @@ Open items are listed grouped by workstream — never flat, never all attributed
 
 The "Project skills" line surfaces what step 9's discovery side effect made invocable — list the skill names from the active project's `.claude/skills/` so the user knows they can type them. Omit the line entirely when the project ships none.
 
-If step 12 left an unrescued prior marker on this workstream (the user picked "Fresh" or didn't resume one of multiple candidates), surface it after the open-items list with its full path so the user can decide what to do with it. Do not act on it automatically.
-
+If step 11 left an unrescued prior marker on this workstream (the user picked "Fresh" or didn't resume one of multiple candidates), surface it after the open-items list with its full path so the user can decide what to do with it. Do not act on it automatically.

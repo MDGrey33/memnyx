@@ -65,15 +65,12 @@ Lessons in capture mode come from:
    - **[YYYY-MM-DD]** Description of the lesson
    ```
 
-4. **Store in cognee** (if available): If the cognee MCP is healthy, call `cognee_add` with the lesson text (prefixed with its category), then call `cognee_cognify` to integrate it into the knowledge graph.
+4. **Trigger skills-manager**: Invoke the `/skills-manager` skill to assess whether the lessons warrant updates to any skill files. Pass the lessons as context.
 
-5. **Trigger skills-manager**: Invoke the `/skills-manager` skill to assess whether the lessons warrant updates to any skill files. Pass the lessons as context.
-
-6. **Report**:
+5. **Report**:
    ```
    Lessons captured: [count]
    Categories: [list]
-   Cognee: stored / skipped (MCP unavailable)
    Skills review: [triggered / no changes needed]
    ```
 

@@ -35,6 +35,8 @@ import re
 import subprocess
 from pathlib import Path
 
+from _common import CLAUDE_MD_MEMORY_INCLUDE  # noqa: E402
+
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 WORKSPACE_MARKER = ".claude/skills/setup-workspace"
 PROJECT_TEMPLATE_REL = ".claude/skills/setup-workspace/templates/project-CLAUDE.md.tmpl"
@@ -172,17 +174,72 @@ def deploy_starters(slug: str, created: list, skipped: list) -> None:
         )
 
 
-def generate_claude_md(slug: str, description: str, created: list, skipped: list) -> None:
+MEMORY_SECTION_HEADING = "## Memory"
+MEMORY_HEADING_RE = re.compile(r"(?m)^" + re.escape(MEMORY_SECTION_HEADING) + r"\s*$")
+
+
+def extract_template_section(template_text: str, heading: str) -> str | None:
+    """Extract one section from the project-CLAUDE.md template: the line
+    matching `heading` up to (not including) the next Markdown heading line
+    of any level. Returns None if `heading` isn't found. Kept generic (not
+    hardcoded to Memory) so it stays correct if the template is reordered."""
+    lines = template_text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == heading), None)
+    if start is None:
+        return None
+    end = next(
+        (i for i in range(start + 1, len(lines)) if re.match(r"^#{1,6}\s", lines[i])),
+        len(lines),
+    )
+    return "\n".join(lines[start:end]).rstrip("\n") + "\n"
+
+
+def generate_claude_md(
+    slug: str, description: str, created: list, skipped: list, patched: list
+) -> None:
+    """Generate a fresh CLAUDE.md from the template, or — if one already exists —
+    leave it untouched (already wired / has its own unrelated Memory heading)
+    or surgically patch in just the template's Memory section."""
     template = workspace() / PROJECT_TEMPLATE_REL
     dst = project_dir(slug) / "CLAUDE.md"
-    if dst.exists():
-        skipped.append(f"projects/{slug}/CLAUDE.md (exists)")
-        return
     if not template.is_file():
         die(f"template missing at {template}\nhint: re-run /setup-workspace init to redeploy.")
+    template_text = template.read_text()
+
+    if dst.exists():
+        existing = dst.read_text()
+        if CLAUDE_MD_MEMORY_INCLUDE in existing:
+            skipped.append(f"projects/{slug}/CLAUDE.md (exists, Memory section present)")
+            return
+        if MEMORY_HEADING_RE.search(existing):
+            # A '## Memory' heading already exists but isn't the Memnyx
+            # include — could be the project's own, unrelated convention.
+            # Appending our block would produce two same-named, conflicting
+            # headings, so leave it alone and let a human reconcile it.
+            skipped.append(
+                f"projects/{slug}/CLAUDE.md (exists, has its own '## Memory' section — "
+                f"add `{CLAUDE_MD_MEMORY_INCLUDE}` to it by hand if that's intended)"
+            )
+            return
+        # Pre-existing CLAUDE.md (typical when symlinking to a real repo that
+        # already has its own) predates or hand-wrote the Memory convention.
+        # Never regenerate/overwrite a real file — surgically append just the
+        # Memory section so the project still gets the MEMORY.md auto-load.
+        memory_section = extract_template_section(template_text, MEMORY_SECTION_HEADING)
+        if memory_section is None:
+            die(
+                f"template at {template} is missing a '{MEMORY_SECTION_HEADING}' heading\n"
+                f"hint: re-run /setup-workspace init to redeploy the template."
+            )
+        if not is_dry_run():
+            dst.write_text(existing.rstrip("\n") + "\n\n" + memory_section)
+        patched.append(
+            f"projects/{slug}/CLAUDE.md (merged in Memory section — pre-existing file preserved)"
+        )
+        return
+
     if not is_dry_run():
-        content = template.read_text()
-        content = content.replace("{{project_name}}", slug)
+        content = template_text.replace("{{project_name}}", slug)
         content = content.replace("{{description}}", description or "")
         dst.write_text(content)
     created.append(f"projects/{slug}/CLAUDE.md")
@@ -239,7 +296,7 @@ def register(slug: str, description: str, created: list, skipped: list) -> None:
     created.append(f"registry entry '{slug}'")
 
 
-def print_summary(slug: str, created: list, skipped: list) -> None:
+def print_summary(slug: str, created: list, skipped: list, patched: list) -> None:
     print()
     if is_dry_run():
         print("=== /setup-workspace add-project [DRY RUN] ===")
@@ -253,6 +310,11 @@ def print_summary(slug: str, created: list, skipped: list) -> None:
         print(f"{verb} ({len(created)}):")
         for item in created:
             print(f"  + {item}")
+    if patched:
+        verb = "Would patch" if is_dry_run() else "Patched"
+        print(f"\n{verb} ({len(patched)}):")
+        for item in patched:
+            print(f"  ~ {item}")
     if skipped:
         verb = "Would skip" if is_dry_run() else "Skipped"
         print(f"\n{verb} ({len(skipped)}):")
@@ -304,13 +366,14 @@ def main() -> None:
 
     created: list = []
     skipped: list = []
+    patched: list = []
 
     create_dirs(args.slug, created, skipped)
     deploy_starters(args.slug, created, skipped)
-    generate_claude_md(args.slug, args.description, created, skipped)
+    generate_claude_md(args.slug, args.description, created, skipped, patched)
     update_gitignore(args.slug, created, skipped)
     register(args.slug, args.description, created, skipped)
-    print_summary(args.slug, created, skipped)
+    print_summary(args.slug, created, skipped, patched)
 
 
 if __name__ == "__main__":

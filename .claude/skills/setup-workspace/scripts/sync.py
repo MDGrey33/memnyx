@@ -58,6 +58,7 @@ from _common import (
     classify_source, fork_overlay_active, fork_include_block, render_template,
     FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL,
     layer_symlink_refusal, base_is_layered,
+    CLAUDE_MD_MEMORY_INCLUDE,
 )
 import launcher  # launcher.write_memnyx_sh regenerates the mmn shell launcher on apply
 
@@ -234,9 +235,6 @@ def build_starter_plan(workspace: Path, source: Path) -> dict:
         "sources": sources,
         "dests": dests,
     }
-
-
-CLAUDE_MD_MEMORY_INCLUDE = "@.claude/memory/MEMORY.md"
 
 
 def claude_md_missing_memory_include(workspace: Path) -> list[Path]:

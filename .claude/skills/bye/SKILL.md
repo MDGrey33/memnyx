@@ -60,7 +60,7 @@ You are wrapping up the current working session. Summarize, persist, and hand of
 
 4. **Promote the session marker** (critical state transition — must run immediately after step 3): Move `<scope>/sessions/active/<filename>` → `<scope>/sessions/<filename>` (directory move only — filename unchanged). Sessions accumulate in `<scope>/sessions/` indefinitely by design — the workstream file is the system of record (status, decisions, open items, all promoted by step 5); session files are the per-session journal, kept for archaeology and not pruned automatically.
 
-   This step runs early — immediately after the narrative is written — so that failures in later steps (workstream update, lessons, MEMORY, cognee) do not leave an orphan marker in `active/`. The only orphan window is the fs operation between step 3's write and step 4's move; if `/bye` fails inside that window, the orphan retains its full narrative and is recoverable.
+   This step runs early — immediately after the narrative is written — so that failures in later steps (workstream update, lessons, MEMORY) do not leave an orphan marker in `active/`. The only orphan window is the fs operation between step 3's write and step 4's move; if `/bye` fails inside that window, the orphan retains its full narrative and is recoverable.
 
    Skip case: 0-match — step 3 wrote the file directly to `<scope>/sessions/`; nothing to promote. (The user-abort branch at step 2 never reaches this step, so there's no other skip case.)
 
@@ -96,11 +96,9 @@ You are wrapping up the current working session. Summarize, persist, and hand of
     - **Propose** specific updates only where the session changed something a doc actually claims. Do NOT write them silently — the user approves or skips. Keep this lightweight; never run a heavy documentation pass inline.
     - If the staleness is more than a quick touch-up **and `/scribe` is available**, nudge: "these docs look stale — want to run `/scribe --from-session`?" If that skill isn't installed, just surface the stale surfaces and move on — never nudge toward a command that isn't there.
 
-11. **Store in cognee** (if available): If the cognee MCP is loaded, call `cognee_add` with the session summary text, then `cognee_cognify` to integrate it into the knowledge graph for future semantic retrieval.
+11. **Suggest contributions**: If any lessons from this session seem broadly useful beyond this scope, mention that the user can run `/contribute` to generalize and stage them for Memnyx.
 
-12. **Suggest contributions**: If any lessons from this session seem broadly useful beyond this scope, mention that the user can run `/contribute` to generalize and stage them for Memnyx.
-
-13. **Output farewell**:
+12. **Output farewell**:
 
     ```
     Session Complete
@@ -112,7 +110,6 @@ You are wrapping up the current working session. Summarize, persist, and hand of
     Workstream: [name] — updated / none
     Memory: updated / unchanged
     Personal: brag-log updated / identity updated / unchanged
-    Cognee: synced / skipped
     Marker: [path] — promoted to sessions/
 
     See you next time! Run /hello to pick up where we left off.

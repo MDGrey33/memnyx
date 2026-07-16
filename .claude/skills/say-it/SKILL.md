@@ -11,7 +11,7 @@ allowed-tools: Write, Bash(kokoro-say *), Bash(pkill *), Bash(kill *), Bash(ls *
 ## Prerequisites
 
 Requires the voice stack installed via `/setup-voice`:
-- `kokoro-say` in `~/bin/`
+- `kokoro-say` in `~/.local/bin/`
 - Kokoro models at `~/.cache/kokoro/`
 
 Run `/setup-voice` first if `kokoro-say` is not found.

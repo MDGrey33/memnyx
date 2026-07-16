@@ -18,6 +18,12 @@ from pathlib import Path
 WORKSPACE_MARKER_REL = ".claude/.workspace"
 BOILERPLATE_MARKER_REL = ".claude/skills/setup-workspace/templates/workspace-CLAUDE.md.tmpl"
 
+# The @-include that auto-loads a CLAUDE.md's MEMORY.md index at session
+# start. Shared by add_project.py (detects/patches it in) and sync.py
+# (detects it and surfaces an advisory) — keep as the single definition so
+# the two scripts can't silently disagree about whether it's present.
+CLAUDE_MD_MEMORY_INCLUDE = "@.claude/memory/MEMORY.md"
+
 
 def die(msg: str) -> None:
     print(f"error: {msg}", file=sys.stderr)
