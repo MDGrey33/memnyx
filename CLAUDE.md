@@ -69,6 +69,7 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 | `/setup-wikibase` | Install and configure a local Wikibase Suite — a Wikidata-style knowledge graph with claim-level provenance (alternative semantic-memory backend to cognee). See `.claude/docs/memory-systems.md`. |
 | `/setup-auto-memory` | Wire in the optional auto-memory system. See `auto-memory/README.md`. |
 | `/setup-playwright-mcp` | Install and configure Playwright MCP for browser automation |
+| `/setup-aws-mcp` | Install and configure the managed AWS MCP Server (via the `mcp-proxy-for-aws` stdio proxy) for read-only AWS access. Supersedes the deprecated `awslabs.aws-api-mcp-server`. |
 | `/research` | Unified research with three depth modes — `--shallow` (parallel web search via the `research-expert` agent), `--standard` (decompose → parallel subagents → synthesize → cite-check), `--deep` (9-stage pipeline: breadth, depth, gap-fill, contradiction detection, theory, fact-check, tiered output). Replaces the former `deep-research-orchestrator`. |
 | `/setup-voice` | Install a local, offline neural voice interface (macOS Apple Silicon) — mlx-whisper (STT) + Kokoro TTS wired into `voice-claude` / `vtranscribe` CLI scripts. No cloud APIs. |
 | `/say-it` | Speak content aloud via Kokoro neural TTS (local, offline) |
@@ -85,6 +86,7 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 - `/bye` → `/lessons` → `/skills-manager`
 - `/setup-cognee` → `/mcp-doctor`
 - `/setup-playwright-mcp` → `/mcp-doctor`
+- `/setup-aws-mcp` → `/mcp-doctor --deep` (deep mode: the new server can't load until Claude Code restarts)
 - `/contribute` → `/sanitizer` (blocks staging on any finding)
 - `/pull-contributions` → `/sanitizer --check` (blocks pull on any finding)
 - `/scribe` → `/sanitizer` (blocks on findings in generated docs)
