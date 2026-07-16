@@ -63,6 +63,7 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 | `/collect-team-activity` | Collect a team member's daily activity (leadership roles) |
 | `/one-on-one-prep` | Synthesize a member's activity into 1:1 meeting prep |
 | `/log` | Append structured entry to agent log (internal/auto-only, not user-invocable) |
+| `/todo` | Persistent task list that survives across sessions — staleness detection, priority decay, blocked detection. Markdown-only, no MCP dependency. Canonical file at `<workspace>/.claude/memory/todo/TODO.md`. |
 | `/contribute` | Generalize a lesson and stage it for Memnyx contribution |
 | `/pull-contributions` | Pull generalized contributions from a project into Memnyx |
 | `/setup-cognee` | Install and configure cognee-mcp on this machine (semantic-memory backend option) |

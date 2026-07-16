@@ -51,6 +51,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 | `/collect-team-activity` | Manual | Collect a team member's daily activity (leadership roles) |
 | `/one-on-one-prep` | Manual | Synthesize a member's activity into 1:1 meeting prep |
 | `/log` | Auto (via skills) | Append structured entry to agent log |
+| `/todo` | Manual | Persistent task list that survives across sessions — staleness detection, priority decay, blocked detection. Markdown-only, no MCP dependency. Canonical file at `<workspace>/.claude/memory/todo/TODO.md`. |
 | `/contribute` | Manual | Generalize a lesson and stage it in `<workspace>/contributions/` |
 | `/pull-contributions` | Manual (from Memnyx repo) | Pull staged contributions from a project into Memnyx |
 | `/setup-cognee` | Manual | Install and configure cognee-mcp on this machine (semantic-memory backend option) |
