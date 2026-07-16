@@ -61,6 +61,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 | `/scribe` | Manual | Generate or maintain a project's Claude-facing docs (`CLAUDE.md`, `.claude/docs/*`, project-context, README) from verified facts. `--deep` adds per-subsystem `scribe-explorer` exploration plus an independent `scribe-verifier` pass; unconfirmed claims go to a hazards artifact. Packaged as a skills-directory plugin (`scribe@skills-dir`), bundling its two agents. |
 | `/setup-auto-memory` | Manual | Wire in the optional auto-memory system (typed atomic files in `~/.claude/projects/<slug>/memory/`). See `auto-memory/README.md`. |
 | `/setup-playwright-mcp` | Manual | Install and configure Playwright MCP for browser automation |
+| `/setup-aws-mcp` | Manual | Install and configure the managed AWS MCP Server (via the `mcp-proxy-for-aws` stdio proxy) for read-only AWS access. Supersedes the deprecated `awslabs.aws-api-mcp-server`. |
 | `/research` | Manual | Unified research with three depth modes — `--shallow` (single-pass parallel web search via the `research-expert` agent), `--standard` (decompose → parallel subagents → synthesize → cite-check), `--deep` (9-stage pipeline: breadth, depth, gap-fill, contradiction detection, theory, fact-check, tiered output). Replaces the former `deep-research-orchestrator`. |
 | `/setup-voice` | Manual | Install a local, offline neural voice interface (macOS Apple Silicon) — mlx-whisper (STT) + Kokoro TTS wired into `voice-claude` / `vtranscribe` CLI scripts. No cloud APIs. |
 | `/say-it` | Manual | Speak content aloud via Kokoro neural TTS (local, offline) |
@@ -75,6 +76,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 /bye ──> /lessons ──> /skills-manager
 /setup-cognee ──> /mcp-doctor
 /setup-playwright-mcp ──> /mcp-doctor
+/setup-aws-mcp ──> /mcp-doctor --deep (deep: server can't load until restart)
 /contribute ──> /sanitizer (blocks staging on any finding)
 /pull-contributions ──> /sanitizer --check (blocks pull on any finding)
 /scribe ──> /sanitizer (blocks on findings in generated docs)
