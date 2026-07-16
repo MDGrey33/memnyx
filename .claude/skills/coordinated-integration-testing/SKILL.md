@@ -202,7 +202,6 @@ NEVER user-invocable — it's a **core operating principle** that applies automa
 - `skills-manager` — review skills based on test findings
 - `bye` — report testing results at session end
 - `mcp-doctor` — check health of MCP servers before testing
-- `run-until-done` — automate test execution
 
 **Unique responsibility:** owns the testing coordination protocol. No other skill can override it.
 
