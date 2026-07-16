@@ -72,6 +72,7 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 | `/research` | Unified research with three depth modes — `--shallow` (parallel web search via the `research-expert` agent), `--standard` (decompose → parallel subagents → synthesize → cite-check), `--deep` (9-stage pipeline: breadth, depth, gap-fill, contradiction detection, theory, fact-check, tiered output). Replaces the former `deep-research-orchestrator`. |
 | `/setup-voice` | Install a local, offline neural voice interface (macOS Apple Silicon) — mlx-whisper (STT) + Kokoro TTS wired into `voice-claude` / `vtranscribe` CLI scripts. No cloud APIs. |
 | `/say-it` | Speak content aloud via Kokoro neural TTS (local, offline) |
+| `/prepare-for-audio` | Shared TTS-ready text cleaner — strips markdown so a TTS engine never speaks "asterisk asterisk", and in voice mode drops emoji too. Used by `/say-it` and any voice-output channel. |
 | `/linkedin-pitch-deflector` | Sweep unread LinkedIn DMs — deflect cold sales pitches, socially probe ambiguous openers, hand genuine threads back to you. Drives logged-in Chrome via the chrome-control MCP. |
 | `/sanitizer` | Scrub a file/dir/glob for secrets, PII, private context, and tone risks before publishing. Auto-invoked by `/contribute` and `/pull-contributions`. Has a `--check` mode for pre-commit/CI gates. |
 | `/finance-controller` | Audit CLAUDE.md, skills, MCPs for cost and context efficiency. Produces a prioritized report; delegates execution to `skills-manager` or asks for approval. Use weekly or when sessions feel slow. |
