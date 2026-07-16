@@ -24,7 +24,7 @@ claude
 ```
 
 1. **Clone** to a path outside your workspace (sibling layout — see Skills Reference)
-2. **Init** — `/setup-workspace init --workspace <path>` deploys skills, generates `CLAUDE.md`, bootstraps identity
+2. **Init** — `/setup-workspace init --workspace <path>` deploys skills, generates the layered `CLAUDE.md` (base + optional fork overlay + native `CLAUDE.local.md`), bootstraps identity
 3. **Add projects** — `/setup-workspace add-project <slug>` from the workspace root
 4. **Start working** — `/hello` to begin each session, `/bye` to end
 5. **Semantic memory (optional)** — `/setup-cognee` or `/setup-wikibase` for semantic retrieval, after the workspace is verified end-to-end. See `.claude/docs/memory-systems.md` to choose a backend.

@@ -55,7 +55,7 @@ Pass `--dry-run` to preview what init would do without writing anything. The scr
 The init action is **idempotent**. Re-running is safe:
 - Skills, agents, and `agent-guardrails.md` are **overwritten** from source (always fresh — these are upstream-owned).
 - Other docs (`architecture.md`, `conventions.md`, `cognee-usage.md`, etc.) are deployed only if missing in the workspace (templates, evolved by the user after init).
-- `CLAUDE.md`, `MEMORY.md`, `lessons-learned.md`, `project-context.md`, `me/*.md`, `.gitignore`, `settings.json` are deployed only if missing — never overwritten.
+- `CLAUDE.md` (base) is generated from the template only if missing; `CLAUDE.fork.md` (fork overlay) is deployed only if missing and only when the source is a fork; `CLAUDE.local.md` (native local overlay) is seeded only if missing. `MEMORY.md`, `lessons-learned.md`, `project-context.md`, `me/*.md`, `.gitignore`, `settings.json` are likewise deployed only if missing — never overwritten.
 - `<workspace>/shell/memnyx.sh` (the `mmn` launcher) is a **derived artifact** — overwritten on every init and sync. The user's shell profile is edited only with explicit consent, and only via an idempotent managed block (a one-time `.memnyx-backup` of the profile is saved before the first edit).
 
 ### Steps
@@ -69,7 +69,7 @@ The init action is **idempotent**. Re-running is safe:
    - `<source>/.claude/agents/*` → `<workspace>/.claude/agents/` (overwrite, if source has agents).
    - `<source>/.claude/docs/agent-guardrails.md` → `<workspace>/.claude/docs/agent-guardrails.md` (overwrite).
    - Other `<source>/.claude/docs/*` → `<workspace>/.claude/docs/` (deploy only if missing — these are templates).
-4. **Generate `<workspace>/CLAUDE.md`** from `templates/workspace-CLAUDE.md.tmpl` (skip if exists).
+4. **Generate the layered `<workspace>/CLAUDE.md`** (skip if exists): render `templates/workspace-CLAUDE.md.tmpl`, substituting `{{fork_overlay_include}}` with an `@CLAUDE.fork.md` include when the source is a fork that ships an overlay template (git-provenance check), else nothing. Then deploy `CLAUDE.fork.md` from the fork overlay template (forks only; skip if exists) and seed `CLAUDE.local.md` (skip if exists). `CLAUDE.local.md` loads natively alongside `CLAUDE.md`, so it is never `@`-included. **Two guards on the overlays:** if an existing `CLAUDE.md` is a legacy monolith (lacks the `## Layered overlays` marker) — or is unreadable / not valid UTF-8 — both overlays are **held** (skipped with a reason) until the user runs the one-time split, so init never orphans a fork overlay the base does not include nor duplicates Conventions into the local seed. And any layer destination that is a **symlink is refused** before writing (it could redirect the write outside the workspace) — remove the symlink and re-run. The same two guards apply on `sync --apply-all`.
 5. **Deploy starter files** (skip if exists):
    - `<workspace>/.claude/memory/MEMORY.md` — empty header.
    - `<workspace>/.claude/memory/lessons-learned.md` — empty header.
@@ -180,14 +180,15 @@ After the user pulls upstream changes into the source clone (e.g., `cd ~/src/mem
 
 ### Behavior
 
-Walks two surfaces and reports them in separate sections:
+Walks three surfaces and reports them in separate sections:
 
 1. **Upstream-owned content** — `.claude/skills/**`, `.claude/agents/**`, `.claude/docs/agent-guardrails.md`. Bucketed as `unchanged`, `update`, `new`, `local-only`. `update` and `new` are actionable; `local-only` is never touched.
 2. **Starter files** — `templates/starters/workspace/**` mapped to workspace paths plus, for each registered project, `templates/starters/project/**` mapped to the project's paths. Bucketed the same way but the `update` bucket is **suppressed** — it surfaces as `divergent` (informational only). Starters are user-evolved after init; sync never offers to overwrite a workspace copy that has diverged.
+3. **CLAUDE.md layers** (reconciled only on `--apply-all`) — the base `CLAUDE.md` and the `CLAUDE.fork.md` overlay are regenerated from their templates (upstream-/fork-owned); `CLAUDE.local.md` is seeded only if missing and never overwritten (user-owned). Two guards hold all three layers: if the source's git origin can't be classified (canonical vs fork), or the base is a legacy monolith lacking the `## Layered overlays` marker, the layers are left untouched.
 
 Only `new` starters are actionable. When a starter `feedback_*.md` lands under `.claude/memory/`, sync emits a hint reminding the user that the matching index line in `MEMORY.md` was not added automatically (because the user's `MEMORY.md` is itself a starter that's diverged).
 
-Does NOT touch `CLAUDE.md`, workstreams, sessions, settings.json, or other `docs/*` templates. The starter walk reports divergence for memory/identity files but never overwrites.
+Reconciles the `CLAUDE.md` layers as above (base + fork overlay regenerated; `CLAUDE.local.md` seeded-if-missing, never overwritten), refusing any layer whose destination is a symlink. Does NOT touch workstreams, sessions, `settings.json`, other `docs/*` templates, or the contents of `CLAUDE.local.md`. The starter walk reports divergence for memory/identity files but never overwrites.
 
 ### Steps
 
@@ -224,7 +225,7 @@ This is the *supported secondary launch flow* in `docs/v2-design-principles.md`:
 ## Important rules
 
 - **Idempotent.** Re-running any action is safe.
-- **Never overwrite user content.** CLAUDE.md, MEMORY.md, lessons-learned.md, identity, brag log, growth, gitignore, settings.json — once present, stay as the user has them.
+- **Never overwrite user content.** MEMORY.md, lessons-learned.md, identity, brag log, growth, gitignore, settings.json, and `CLAUDE.local.md` — once present, stay as the user has them. The base `CLAUDE.md` and the `CLAUDE.fork.md` overlay are upstream-/fork-owned (generated from templates, reconciled by sync); workspace-specific instructions belong in `CLAUDE.local.md`, which sync never overwrites.
 - **Init overwrites upstream-owned content; sync asks.** Skills, agents, agent-guardrails.md are Memnyx's contract — `init` overwrites them unconditionally (first-time setup, no local edits to protect). `sync` is conservative: detects local edits and asks the user before overwriting (workspace has evolved since init).
 - **Refuse, don't guess.** If the source can't be uniquely identified, fail with a clear hint rather than picking arbitrarily.
 - **No project scaffolding here.** That's `/setup-workspace add-project`'s job, not `init`'s.
