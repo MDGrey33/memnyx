@@ -12,7 +12,7 @@ See `_shared/MODEL_SELECTION.md` (or your workspace's model-policy doc) for full
 - **Promote to a mid-tier reasoning model when:** the loop task itself needs reasoning — but that's the inner task, not this controller
 - **Promote to a top-tier model when:** never
 
-# Run Until Done (Ralph Loop)
+# Run Until Done
 
 Execute a multi-step task autonomously, looping until done. No human check-ins mid-execution.
 

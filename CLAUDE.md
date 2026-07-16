@@ -79,6 +79,7 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 | `/scribe` | Generate or maintain a project's Claude-facing docs (`CLAUDE.md`, `.claude/docs/*`, project-context, README) from verified facts. Fast pass commits directly-readable signals; `--deep` dispatches a `scribe:scribe-explorer` per subsystem plus an independent `scribe:scribe-verifier` pass, routing unconfirmed claims to a hazards artifact. Packaged as a skills-directory plugin — autoloads as `scribe@skills-dir`, bundling its two agents. |
 | `/google-script-deploy` | Deploy an HTML file as a Google Apps Script web app with a stable URL. Called by other skills (e.g. a dashboard-generating skill) with a `sourceDir` argument; handles clasp setup, auth, project creation, and in-place redeploys. |
 | `/security-snapshot` | Full security pipeline — AWS Inspector V2 + GitHub security alerts → correlation → self-contained HTML dashboard with trend history. Org config in `scripts/config.local.json` (gitignored; overlays the committed template); first run prompts for it. Run monthly or on demand. |
+| `/run-until-done` | Autonomous task loop — runs a task repeatedly until completion criteria are met. No babysitting required. |
 
 ### Skill chains (automatic)
 - `/hello` → `/mcp-doctor` (session mode: enumerates loaded tools, no process spawning)
