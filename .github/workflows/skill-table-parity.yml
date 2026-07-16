@@ -1,11 +1,16 @@
 name: skill-table parity
 
-# Fails a PR if the on-disk skill set drifts from the skill tables in
-# README.md, CLAUDE.md, and the generated-workspace template. See
-# scripts/check_skill_tables.py for the rationale.
+# Two jobs gated on the same `.claude/skills/**` trigger:
+#   parity                 — fails a PR if the on-disk skill set drifts from
+#                             the skill tables in README.md, CLAUDE.md, and
+#                             the generated-workspace template. See
+#                             scripts/check_skill_tables.py for the rationale.
+#   setup-workspace-tests   — regression tests for add_project.py's
+#                             CLAUDE.md generate/patch behavior. See
+#                             .claude/skills/setup-workspace/scripts/test_add_project.py.
 
-# Least-privilege: the only job checks out the repo and runs a script,
-# so read-only access to contents is all it needs.
+# Least-privilege: both jobs only check out the repo and run a script,
+# so read-only access to contents is all either needs.
 permissions:
   contents: read
 
@@ -29,3 +34,14 @@ jobs:
           python-version: "3.12"
       - name: Check skill-table parity
         run: python3 scripts/check_skill_tables.py
+
+  setup-workspace-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pytest
+      - name: Test add_project.py (CLAUDE.md generate/patch behavior)
+        run: pytest .claude/skills/setup-workspace/scripts/test_add_project.py -v

@@ -1,71 +1,50 @@
 # Cognee MCP Usage Guide
 
-This project uses [cognee](https://github.com/topoteretes/cognee) via MCP for persistent semantic memory.
+This project can optionally use [cognee](https://github.com/topoteretes/cognee) via MCP for semantic memory. Cognee is **not** wired into the standard session loop (`/hello`, `/bye`, `/lessons`) — those rely on markdown memory (`.claude/memory/`) as the primary, always-on store. Use cognee deliberately, on demand, when you want semantic recall over a corpus that a plain grep won't serve well.
 
 ## Available MCP Tools
 
-### `cognee_add`
-Add text or data to cognee for processing.
+The server exposes 11 tools; the two you'll use directly for text-based memory:
+
+### `remember`
+Store data in memory.
 
 ```
-cognee_add(text="Session summary: implemented auth flow using JWT tokens...")
+remember(data="Session summary: implemented auth flow using JWT tokens...")
 ```
 
-Use this to store session summaries, lessons learned, and project context.
+Without `session_id`, this runs the full add + cognify pipeline **synchronously** — it ingests the text and extracts entities/relationships into the graph before returning. This can take minutes on a real corpus (measured ~264s on a ~7,500-token input) — never call it on a path a user is waiting on. With `session_id`, it stores to a fast session-cache only and does **not** persist to the permanent graph.
 
-### `cognee_cognify`
-Process added data into the knowledge graph. Call this after `cognee_add` to extract entities and relationships.
-
-```
-cognee_cognify()
-```
-
-### `cognee_search`
-Search the knowledge graph semantically.
+### `recall`
+Search memory with auto-routing.
 
 ```
-cognee_search(query="authentication patterns used in this project")
+recall(query="authentication patterns used in this project")
 ```
 
-Returns relevant context from all previously stored knowledge.
+Supports `search_type` overrides (`GRAPH_COMPLETION`, `RAG_COMPLETION`, `CHUNKS`, etc.) and `datasets` filtering. Typical latency 5–21s for `GRAPH_COMPLETION`.
 
-### `cognee_list_datasets`
-List all datasets in cognee. Useful as a health check.
+### `cognify_file`
+Ingest a file (base64-encoded) into memory. Runs the add step synchronously but **dispatches cognify in the background** — the call itself returns fast even though graph processing continues after.
 
-```
-cognee_list_datasets()
-```
+### `list_datasets_json`
+List datasets as structured JSON. Useful as a health check.
 
-## Typical Workflows
+## Why it's opt-in, not automatic
 
-### Storing a lesson
-```
-1. cognee_add(text="[convention] Always use type hints for function signatures")
-2. cognee_cognify()
-```
+Two properties make cognee a poor fit for anything on the hot path (session start/close):
 
-### Retrieving context at session start
-```
-1. cognee_search(query="recent work and open items")
-2. cognee_search(query="project conventions and patterns")
-```
+- **`remember` (without `session_id`) blocks for as long as graph extraction takes** — no fire-and-forget mode for raw text short of the `cognify_file` file-upload route.
+- **Every `remember`/`recall` call costs LLM inference** — there's no free tier of usage. Storing on every session close, whether or not anything ever queries it back, is pure spend with no proven return.
 
-### Storing a session summary
-```
-1. cognee_add(text="Session summary: Added pagination to the /users endpoint, fixed N+1 query in orders list")
-2. cognee_cognify()
-```
-
-## Timing: cognee_cognify is async
-
-After calling `cognee_cognify`, the knowledge graph processing runs asynchronously. If you search immediately after, you may get incomplete results. In practice this is only an issue in `/bye` where we add + cognify + potentially search in quick succession. The skills are designed to add/cognify as a fire-and-forget step — the results will be available next session via `/hello`.
+`/hello`, `/bye`, and `/lessons` were previously wired to call `cognee_add`/`cognee_cognify`/`cognee_search` — none of which exist on the real server (that was a doc/skill drift bug, not a deliberate design). They've been reverted to markdown-memory-only. If you want cognee's semantic recall, invoke it explicitly — e.g. ask "check cognee for prior work on X" — rather than expecting it in the standard flow.
 
 ## When Cognee is Unavailable
 
-All skills gracefully degrade when cognee MCP is down. Markdown memory files (`.claude/memory/`) serve as the primary persistent store. Cognee adds semantic search over accumulated knowledge but is not required for basic operation.
+Every skill degrades gracefully without it. Markdown memory files are the primary persistent store regardless of cognee's health.
 
 ## Troubleshooting
 
-- **MCP not connecting**: Run `/mcp-doctor` for diagnostics, then `/setup-cognee` if needed
-- **No results from search**: Ensure you've run `cognee_cognify` after adding data
-- **Slow responses**: Cognee processes data asynchronously; wait a moment after cognify
+- **MCP not connecting**: Run `/mcp-doctor` for diagnostics, then `/setup-cognee` if needed.
+- **`recall` returns nothing**: confirm the target dataset actually has data (`list_datasets_json`) — an empty graph returns nothing to find.
+- **Slow `remember` calls**: expected — see the synchronous-pipeline note above. Use `cognify_file` if you need a faster-returning write path.

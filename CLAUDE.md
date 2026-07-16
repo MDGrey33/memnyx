@@ -28,8 +28,8 @@ Project layout:
 │   ├── lessons-learned.md     # Raw lessons inbox (always loaded)
 │   └── project-context.md     # Domain context (always loaded)
 ├── docs/
-│   ├── architecture.md        # Project architecture (on-demand)
-│   └── conventions.md         # Code style and patterns (on-demand)
+│   ├── architecture.md        # Workspace project-architecture template, deployed by init (on-demand)
+│   └── conventions.md         # Workspace code-conventions template, deployed by init (on-demand)
 └── settings.json
 ```
 
@@ -63,15 +63,19 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 | `/collect-team-activity` | Collect a team member's daily activity (leadership roles) |
 | `/one-on-one-prep` | Synthesize a member's activity into 1:1 meeting prep |
 | `/log` | Append structured entry to agent log (internal/auto-only, not user-invocable) |
+| `/todo` | Persistent task list that survives across sessions — staleness detection, priority decay, blocked detection. Markdown-only, no MCP dependency. Canonical file at `<workspace>/.claude/memory/todo/TODO.md`. |
 | `/contribute` | Generalize a lesson and stage it for Memnyx contribution |
 | `/pull-contributions` | Pull generalized contributions from a project into Memnyx |
 | `/setup-cognee` | Install and configure cognee-mcp on this machine (semantic-memory backend option) |
 | `/setup-wikibase` | Install and configure a local Wikibase Suite — a Wikidata-style knowledge graph with claim-level provenance (alternative semantic-memory backend to cognee). See `.claude/docs/memory-systems.md`. |
 | `/setup-auto-memory` | Wire in the optional auto-memory system. See `auto-memory/README.md`. |
 | `/setup-playwright-mcp` | Install and configure Playwright MCP for browser automation |
+| `/setup-aws-mcp` | Install and configure the managed AWS MCP Server (via the `mcp-proxy-for-aws` stdio proxy) for read-only AWS access. Supersedes the deprecated `awslabs.aws-api-mcp-server`. |
 | `/research` | Unified research with three depth modes — `--shallow` (parallel web search via the `research-expert` agent), `--standard` (decompose → parallel subagents → synthesize → cite-check), `--deep` (9-stage pipeline: breadth, depth, gap-fill, contradiction detection, theory, fact-check, tiered output). Replaces the former `deep-research-orchestrator`. |
 | `/setup-voice` | Install a local, offline neural voice interface (macOS Apple Silicon) — mlx-whisper (STT) + Kokoro TTS wired into `voice-claude` / `vtranscribe` CLI scripts. No cloud APIs. |
 | `/say-it` | Speak content aloud via Kokoro neural TTS (local, offline) |
+| `/prepare-for-audio` | Shared TTS-ready text cleaner — strips markdown so a TTS engine never speaks "asterisk asterisk", and in voice mode drops emoji too. Used by `/say-it` and any voice-output channel. |
+| `/humanise` | Rewrite text so it reads like a person wrote it, not an LLM — strip AI "tells" (em-dash overuse, rule-of-three, corporate diction, reflexive hedging) while preserving meaning. Register-aware. |
 | `/linkedin-pitch-deflector` | Sweep unread LinkedIn DMs — deflect cold sales pitches, socially probe ambiguous openers, hand genuine threads back to you. Drives logged-in Chrome via the chrome-control MCP. |
 | `/sanitizer` | Scrub a file/dir/glob for secrets, PII, private context, and tone risks before publishing. Auto-invoked by `/contribute` and `/pull-contributions`. Has a `--check` mode for pre-commit/CI gates. |
 | `/finance-controller` | Audit CLAUDE.md, skills, MCPs for cost and context efficiency. Produces a prioritized report; delegates execution to `skills-manager` or asks for approval. Use weekly or when sessions feel slow. |
@@ -81,12 +85,18 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 | `/scribe` | Generate or maintain a project's Claude-facing docs (`CLAUDE.md`, `.claude/docs/*`, project-context, README) from verified facts. Fast pass commits directly-readable signals; `--deep` dispatches a `scribe:scribe-explorer` per subsystem plus an independent `scribe:scribe-verifier` pass, routing unconfirmed claims to a hazards artifact. Packaged as a skills-directory plugin — autoloads as `scribe@skills-dir`, bundling its two agents. |
 | `/google-script-deploy` | Deploy an HTML file as a Google Apps Script web app with a stable URL. Called by other skills (e.g. a dashboard-generating skill) with a `sourceDir` argument; handles clasp setup, auth, project creation, and in-place redeploys. |
 | `/security-snapshot` | Full security pipeline — AWS Inspector V2 + GitHub security alerts → correlation → self-contained HTML dashboard with trend history. Org config in `scripts/config.local.json` (gitignored; overlays the committed template); first run prompts for it. Run monthly or on demand. |
+| `/coordinated-integration-testing` | Automatic (core principle, not user-invocable) — enforces coordinated integration testing on any system change: identify tool/hook/service dependencies before building, check what's actively running before testing, require all 4 test levels (unit/component/integration/system), and document results before declaring a change ready. |
+| `/run-until-done` | Autonomous task loop — runs a task repeatedly until completion criteria are met. No babysitting required. |
+| `/second-opinion` | Dual-model review — runs a plan/architecture/security/strategy/code question past a second, independent model CLI (e.g. Codex) and synthesizes agreements, disagreements, and a recommended action. Requires a second-model CLI installed and authenticated separately from Claude. |
+| `/cmux-control` | Deterministic playbook for controlling and introspecting cmux terminal tabs and the Claude Code sessions inside them — enumerate tabs, inject text/commands, read a tab's output, launch/drive a session, inspect Claude internals (turn-state, session id, transcript), and the always-on externally-streamable session pattern. |
+| `/cmux-browse` | Drive a real web browser via cmux's built-in snapshot-driven browser automation — navigate, read via accessibility snapshots, click/fill/select forms, attach files, log in via cookies/profile import, screenshot, and submit. Use instead of a permission-gated browser MCP for autonomous form-fill work (job applications, ATS portals, dashboards). |
 
 ### Skill chains (automatic)
 - `/hello` → `/mcp-doctor` (session mode: enumerates loaded tools, no process spawning)
 - `/bye` → `/lessons` → `/skills-manager`
 - `/setup-cognee` → `/mcp-doctor`
 - `/setup-playwright-mcp` → `/mcp-doctor`
+- `/setup-aws-mcp` → `/mcp-doctor --deep` (deep mode: the new server can't load until Claude Code restarts)
 - `/contribute` → `/sanitizer` (blocks staging on any finding)
 - `/pull-contributions` → `/sanitizer --check` (blocks pull on any finding)
 - `/scribe` → `/sanitizer` (blocks on findings in generated docs)
@@ -113,12 +123,13 @@ To propose a skill improvement:
 ## Detailed Docs
 
 Refer to these files for more detail (use `@` to include them in context):
-- `.claude/docs/architecture.md` — Memnyx architecture
-- `.claude/docs/conventions.md` — code style and patterns
+- `docs/v2-design-principles.md` — Memnyx v2 architecture, lifecycle, and naming/conventions (the *what* and *why* of the v2 design)
 - `.claude/docs/memory-systems.md` — how to choose a semantic-memory backend (markdown / cognee / Wikibase)
 - `.claude/docs/cognee-usage.md` — how to use cognee MCP tools for semantic memory
 - `.claude/docs/wikibase-migration-patterns.md` — patterns for the Wikibase provenance-graph backend
 - `.claude/docs/agent-guardrails.md` — operational rules for agents working in this repo
+
+`.claude/docs/architecture.md` and `.claude/docs/conventions.md` are **not** Memnyx docs — they ship as empty templates that `init` deploys into each workspace for the user's *own* project. Memnyx's own architecture and conventions live in `docs/v2-design-principles.md`.
 
 ## Keeping docs in sync
 
@@ -132,6 +143,6 @@ Refer to these files for more detail (use `@` to include them in context):
 | A template under `.claude/skills/setup-workspace/templates/` | the template itself; and if structural, `init.py` or `add_project.py` `STARTER_MAP` |
 | Added / removed / renamed an **agent** | `README.md` and this `CLAUDE.md` (note the agent where relevant; agents live in `.claude/agents/`, deployed + synced like skills) |
 | An agent operating rule | `.claude/docs/agent-guardrails.md` (overwritten by `init` and `sync` — Memnyx is the canonical source) |
-| Architecture, lifecycle, or skill-chain wiring | `.claude/docs/architecture.md` |
-| Code style, file organisation, naming patterns | `.claude/docs/conventions.md` |
+| Architecture, lifecycle, or skill-chain wiring | `docs/v2-design-principles.md` |
+| Code style, file organisation, naming patterns | `docs/v2-design-principles.md` (`## Naming`, `## Skill authoring principles`) |
 | A new doc surface | the row above for that surface, and this table |
