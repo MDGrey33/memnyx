@@ -55,8 +55,8 @@ from pathlib import Path
 from _starter_maps import PROJECT_STARTERS, WORKSPACE_STARTERS
 from _common import (
     die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL,
-    classify_source, fork_overlay_active, fork_include_block, render_template,
-    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL,
+    classify_source, fork_overlay_source, fork_include_block, render_template,
+    LOCAL_OVERLAY_SEED_REL,
     layer_symlink_refusal, base_is_layered,
     CLAUDE_MD_MEMORY_INCLUDE,
 )
@@ -292,7 +292,8 @@ def reconcile_claude_layers(workspace: Path, source: Path, apply: bool) -> list[
     buckets because base/fork/local are generated from templates with substitution.
 
       base   CLAUDE.md        overwritten from the rendered base template
-      fork   CLAUDE.fork.md   overwritten from the fork overlay template (forks only)
+      fork   CLAUDE.fork.md   overwritten from the fork's repo-root CLAUDE.fork.md
+                              (or the bootstrap stub) — forks only
       local  CLAUDE.local.md  seeded from its template if absent; never overwritten
 
     Two guards protect ALL three layers (touch nothing if either trips):
@@ -329,10 +330,11 @@ def reconcile_claude_layers(workspace: Path, source: Path, apply: bool) -> list[
     else:
         actions.append("CLAUDE.md — would overwrite (base differs)")
 
-    # fork overlay
+    # fork overlay — sourced from the fork's repo-root CLAUDE.fork.md (or bootstrap stub)
     fork_dst = workspace / "CLAUDE.fork.md"
-    if fork_overlay_active(source):
-        rendered_fork = render_template(source / FORK_OVERLAY_TEMPLATE_REL, workspace)
+    fork_src = fork_overlay_source(source)
+    if fork_src is not None:
+        rendered_fork = render_template(fork_src, workspace)
         if fork_dst.is_file() and fork_dst.read_text(encoding="utf-8") == rendered_fork:
             actions.append("CLAUDE.fork.md — unchanged (fork overlay)")
         elif apply:
@@ -341,7 +343,7 @@ def reconcile_claude_layers(workspace: Path, source: Path, apply: bool) -> list[
             verb = "missing" if not fork_dst.is_file() else "differs"
             actions.append(f"CLAUDE.fork.md — would overwrite (fork overlay; {verb})")
     elif kind == "fork":
-        actions.append("CLAUDE.fork.md — source is a fork but ships no overlay template; base include suppressed")
+        actions.append("CLAUDE.fork.md — source is a fork but provides no overlay (no repo-root CLAUDE.fork.md or stub); base include suppressed")
     elif fork_dst.is_file():
         actions.append("CLAUDE.fork.md — ORPHANED: source is canonical and the base no longer references it; remove by hand if the source change was intended")
 

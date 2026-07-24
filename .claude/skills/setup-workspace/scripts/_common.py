@@ -69,9 +69,15 @@ def resolve_workspace(workspace_arg: str, *, require_workspace: bool = True) -> 
 # canonical, anything else is a fork.
 CANONICAL_REPO = "mdgrey33/memnyx"
 
-# The fork overlay template ships WITH the skill (identical in Memnyx and forks):
-# Memnyx ships a stub, a fork fills it. A fork overlay is "active" only when the
-# source is a fork AND actually ships this template (see fork_overlay_active).
+# A fork's REAL overlay content lives at the source REPO ROOT as CLAUDE.fork.md —
+# outside the .claude/skills/ tree that `sync` overwrites wholesale, so fork content
+# is never clobbered by a skill sync. This is the canonical, preferred source.
+FORK_OVERLAY_FILE_REL = "CLAUDE.fork.md"
+
+# The bundled stub template ships WITH the skill (identical in Memnyx and forks):
+# Memnyx ships it empty. It is ONLY a bootstrap fallback — used to seed a workspace's
+# CLAUDE.fork.md for a fork that has not yet authored its repo-root CLAUDE.fork.md.
+# Once the fork adds that file, the repo-root file wins (see fork_overlay_source).
 FORK_OVERLAY_TEMPLATE_REL = ".claude/skills/setup-workspace/templates/CLAUDE.fork.md.tmpl"
 
 # Seed for the local overlay (CLAUDE.local.md). Managed by the layer logic —
@@ -164,11 +170,31 @@ def source_is_fork(source: Path) -> bool:
     return classify_source(source) == "fork"
 
 
+def fork_overlay_source(source: Path) -> Path | None:
+    """The file a fork's CLAUDE.fork.md is rendered from, or None if the source is
+    not a fork or provides no overlay. Precedence: the fork's repo-root CLAUDE.fork.md
+    (its real, sync-safe content home) wins; the bundled stub template is only a
+    bootstrap fallback for a fork that has not authored one yet. One resolver, so
+    init, sync, and the base `@`-include all agree on the source (a base that
+    `@`-includes CLAUDE.fork.md while the overlay write finds nothing is the dangling
+    -include bug this unification prevents)."""
+    if not source_is_fork(source):
+        return None
+    repo_root = source / FORK_OVERLAY_FILE_REL
+    if repo_root.is_file():
+        return repo_root
+    stub = source / FORK_OVERLAY_TEMPLATE_REL
+    if stub.is_file():
+        return stub
+    return None
+
+
 def fork_overlay_active(source: Path) -> bool:
-    """A fork overlay is active only when the source is a fork AND ships the
-    overlay template — so the base never gets an `@CLAUDE.fork.md` include for a
-    file that would never be created."""
-    return source_is_fork(source) and (source / FORK_OVERLAY_TEMPLATE_REL).is_file()
+    """Whether the source provides a fork overlay — a fork AND some overlay source
+    (repo-root CLAUDE.fork.md or the bootstrap stub). Gates the base's
+    `@CLAUDE.fork.md` include so it is never added for a file that will not be
+    written."""
+    return fork_overlay_source(source) is not None
 
 
 def fork_include_block(source: Path) -> str:

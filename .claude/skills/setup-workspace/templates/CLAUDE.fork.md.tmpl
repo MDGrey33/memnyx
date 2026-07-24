@@ -1,9 +1,19 @@
-# {{workspace_name}} — fork overlay
+# <Your Fork> — fork overlay
 
-> Stub. The base CLAUDE.md is upstream; this overlay is for fork-specific additions.
-> Memnyx ships it empty; a fork fills it in. Deployed by `/setup-workspace` only
-> when the sync source is a fork (decided by git provenance, not by this file).
-> Additive only — extends the base, never contradicts it.
+> Bootstrap stub for a fork overlay. The base CLAUDE.md is upstream; this overlay
+> carries fork-specific additions. Memnyx ships this stub empty.
+>
+> A fork's REAL overlay content belongs at the fork's repo root as `CLAUDE.fork.md`
+> — outside `.claude/skills/`, so a skill sync never overwrites it. `/setup-workspace`
+> renders that repo-root file into each workspace's `CLAUDE.fork.md`; this stub is
+> only the fallback used to seed a workspace before the fork has authored its
+> repo-root file. To adopt: replace `<Your Fork>` above, fill the sections below,
+> and save this as `CLAUDE.fork.md` at your fork's repo root. Additive only —
+> extends the base, never contradicts it.
+>
+> Note: `{{workspace_name}}` and `{{workspace_path}}` are substituted per-workspace
+> when this file is deployed (same as the base template) — use them intentionally
+> for workspace-specific text, and avoid the literal `{{…}}` tokens otherwise.
 
 ## Fork Skills
 

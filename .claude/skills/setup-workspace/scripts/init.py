@@ -56,8 +56,8 @@ CLAUDE_DIRS = ["memory", "skills", "agents", "docs"]
 from _starter_maps import WORKSPACE_STARTERS as STARTER_MAP  # noqa: E402
 from _common import (  # noqa: E402
     die, is_v2_boilerplate, resolve_workspace, BOILERPLATE_MARKER_REL,
-    fork_include_block, source_is_fork, render_template,
-    FORK_OVERLAY_TEMPLATE_REL, LOCAL_OVERLAY_SEED_REL,
+    fork_include_block, fork_overlay_source, source_is_fork, render_template,
+    LOCAL_OVERLAY_SEED_REL,
     layer_symlink_refusal, base_is_layered,
 )
 import launcher  # noqa: E402  — launcher.write_memnyx_sh writes the mmn shell launcher
@@ -305,15 +305,17 @@ def generate_claude_md(source: Path, created: list, skipped: list) -> None:
 
 
 def deploy_fork_overlay(source: Path, created: list, skipped: list) -> None:
-    """Deploy CLAUDE.fork.md when the source is a fork (by git provenance) and ships
-    a fork overlay template. The template travels with the skill; only a fork's
-    filled copy gets deployed. Deploy-if-missing; sync refreshes it thereafter."""
-    if not source_is_fork(source):
-        skipped.append("CLAUDE.fork.md (source is canonical or unknown — no fork overlay)")
-        return
-    template = source / FORK_OVERLAY_TEMPLATE_REL
-    if not template.is_file():
-        skipped.append("CLAUDE.fork.md (source is a fork but ships no overlay template)")
+    """Deploy CLAUDE.fork.md when the source is a fork that provides overlay content.
+    The content comes from the fork's repo-root CLAUDE.fork.md (preferred) or the
+    bundled bootstrap stub (see fork_overlay_source). Deploy-if-missing; sync refreshes
+    it thereafter. The workspace copy is never hand-edited — fork changes are made at
+    the source and flow in via sync (workspace-specific notes go in CLAUDE.local.md)."""
+    src = fork_overlay_source(source)
+    if src is None:
+        if source_is_fork(source):
+            skipped.append("CLAUDE.fork.md (source is a fork but provides no overlay — no repo-root CLAUDE.fork.md or stub)")
+        else:
+            skipped.append("CLAUDE.fork.md (source is canonical or unknown — no fork overlay)")
         return
     dst = workspace() / "CLAUDE.fork.md"
     reason = layer_symlink_refusal(dst)
@@ -324,7 +326,7 @@ def deploy_fork_overlay(source: Path, created: list, skipped: list) -> None:
         skipped.append("CLAUDE.fork.md (exists)")
         return
     if not is_dry_run():
-        dst.write_text(render_template(template, workspace()), encoding="utf-8")
+        dst.write_text(render_template(src, workspace()), encoding="utf-8")
     created.append("CLAUDE.fork.md")
 
 
