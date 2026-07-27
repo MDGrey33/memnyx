@@ -56,13 +56,22 @@ You are wrapping up the current working session. Summarize, persist, and hand of
    - [issues encountered and how they were fixed]
    ```
 
-   **0-match case** (no marker was selected at step 1): write the narrative directly to a fresh file at `<scope>/sessions/<YYYY-MM-DD>-<workstream-slug>-<HHMMSS>-<6hex>.md` instead — matches the filename format `/hello` step 14 uses. Skip step 4 entirely (the file is already at its final location).
+   **0-match case** (no marker was selected at step 1): write the narrative directly to a fresh file at `<scope>/sessions/<YYYY-MM-DD>-<workstream-slug>-<HHMMSS>-<6hex>.md` instead — matches the filename format `/hello` step 13 uses. Skip step 4's promotion (4a) — the file is already at its final location — but **Step 4b still runs** (the pointer write, below).
 
-4. **Promote the session marker** (critical state transition — must run immediately after step 3): Move `<scope>/sessions/active/<filename>` → `<scope>/sessions/<filename>` (directory move only — filename unchanged). Sessions accumulate in `<scope>/sessions/` indefinitely by design — the workstream file is the system of record (status, decisions, open items, all promoted by step 5); session files are the per-session journal, kept for archaeology and not pruned automatically.
+4. **Promote the session marker (4a)** (critical state transition — must run immediately after step 3): Move `<scope>/sessions/active/<filename>` → `<scope>/sessions/<filename>` (directory move only — filename unchanged). Sessions accumulate in `<scope>/sessions/` indefinitely by design — the workstream file is the system of record (status, decisions, open items, all promoted by step 5); session files are the per-session journal, kept for archaeology and not pruned automatically.
 
    This step runs early — immediately after the narrative is written — so that failures in later steps (workstream update, lessons, MEMORY) do not leave an orphan marker in `active/`. The only orphan window is the fs operation between step 3's write and step 4's move; if `/bye` fails inside that window, the orphan retains its full narrative and is recoverable.
 
    Skip case: 0-match — step 3 wrote the file directly to `<scope>/sessions/`; nothing to promote. (The user-abort branch at step 2 never reaches this step, so there's no other skip case.)
+
+   **Step 4b — update the global last-session pointer** (runs immediately after the promotion above, in the same turn; also runs in the 0-match case even though the promotion was skipped). Write `<workspace>/.claude/.last-session` — a scope-neutral global pointer alongside `projects-index.json`, **not** under any `sessions/` directory. The last session may belong to *any* scope (a project or workspace level), whereas `<workspace>/sessions/` holds workspace-scope sessions only — so a cross-scope pointer there would be a scope violation. Name the session that just closed — the promoted file, or, in the 0-match case, the file step 3 wrote directly. The session that most recently closed is by definition the most recent *across all scopes*, so `/hello` reads this one small file for its "Last session" line instead of enumerating and datetime-sorting every closed session in every scope. Overwrite unconditionally — last close wins; no mtime-check (a stale or missing pointer costs `/hello` only a fallback scan, never correctness). Contents:
+
+   ```yaml
+   path: <path relative to workspace>          # e.g. projects/<slug>/sessions/<filename> or sessions/<filename>
+   project_slug: <slug or "workspace">
+   workstream_slug: <slug>
+   closed_at: <ISO-8601 with TZ offset>
+   ```
 
 5. **Update active workstream**: Edit `<scope>/workstreams/<workstream_slug>.md` in place — surgical edits, not full rewrite. Use mtime-check. Status line → today's date + one-line current state. Open Items → mark closed `[x]` (with user confirmation), append new `[ ]`. Decisions → append today's with `[YYYY-MM-DD]` prefix. Long-form artifacts (drafts, comparison docs, design specs over ~15 lines) go to `<scope>/artifacts/<workstream_slug>/<filename>.md`; the workstream gets a one-line pointer.
 
