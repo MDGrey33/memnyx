@@ -10,6 +10,8 @@ You are starting a new working session. Resolve the active context, load memory,
 
 ## Steps
 
+> **Execution strategy — front-load the recap (steps 1–6).** Steps 1–6 take no user input; running them as six serial tool round-trips is the main avoidable latency in session start. Gather everything they need in ONE batched pass, then emit the step-6 recap in a single turn. The independent filesystem work — the workspace file reads (step 3), the registry read, the active-marker enumeration (step 4), the `.last-session` pointer read (step 6), and the `grep -c` lessons count — can all go out together (parallel tool calls, or a single shell probe). When the topic arrived with the `/hello` invocation, the step-10 topic→workstream grep can join this same batch too — it is non-interactive fs work. `/mcp-doctor` (step 5) reads only from tools already in context, and `MEMORY.md` is already loaded via the `@`-import — neither needs I/O. The step numbers are a logical order, **not** a mandate to pay one round-trip per step. Only the *questions* from step 7 onward are genuinely interactive. (Sole exception: step 9's `project-context` read must use the Read tool for its skill-discovery side effect — but that runs after step 7's answer, never in this front-loaded batch, so at workspace root a shell probe for steps 1–6 is fine.)
+
 ### 1. Self-locate the workspace
 
 The skill's base directory is `<workspace>/.claude/skills/hello/`. Resolve `<workspace>` by walking up three directory levels. Validate that `<workspace>/.claude/.workspace` exists. If validation fails, abort with a setup-broken error — this is not recoverable from inside /hello.
@@ -18,24 +20,26 @@ The skill's base directory is `<workspace>/.claude/skills/hello/`. Resolve `<wor
 
 Compute one of five cases. The result is a *hint* for phrasing in step 7; it does not by itself decide the active project.
 
-A session whose cwd is outside `<workspace>/` is allowed in **exactly ONE** case: cwd is a **registered project's own clone**, launched with `--add-dir <workspace>` (the *Registered project (external clone)* case below). The workspace is located in step 1 from this skill's own base directory, which is what makes that one case workable. **Every other outside-workspace cwd is refused** (the *Outside workspace (refuse)* case). This is a closed exception — do NOT extend it to any other outside-workspace scenario, and do NOT improvise a project binding for a directory that is not a registered project's clone.
+A session whose cwd is outside `<workspace>/` is allowed in **exactly ONE** case: cwd is a **registered project's own directory** (the real path a `<workspace>/projects/<slug>` symlink points to), launched with `--add-dir <workspace>` (the *Registered project (external path)* case below). The workspace is located in step 1 from this skill's own base directory, which is what makes that one case workable. **Every other outside-workspace cwd is refused** (the *Outside workspace (refuse)* case). This is a closed exception — do NOT extend it to any other outside-workspace scenario, and do NOT improvise a project binding for a directory that is not a registered project's own directory.
 
 - **Registered project (in-workspace)** — cwd is under `<workspace>/projects/<slug>/` and `<slug>` is in the registry. Hint = that project.
-- **Registered project (external clone)** — cwd is *not* under `<workspace>/`, **and** `realpath(cwd)` is (or is under) `realpath(<workspace>/projects/<slug>)` for some registered `<slug>` — i.e. launched directly from the project's own clone with the workspace supplied via `--add-dir`. This is the only sanctioned outside-workspace case. Hint = that project. **In this case the project folder's own `.mcp.json` and `.claude/settings.json` are in effect, not the workspace's** — workspace-scoped MCP servers do not load (user-scope ones still do). Surface this plainly in the recap (step 6) so the engineer is not surprised by a different MCP/settings surface.
+- **Registered project (external path)** — cwd is *not* under `<workspace>/`, **and** `realpath(cwd)` is (or is under) `realpath(<workspace>/projects/<slug>)` for some registered `<slug>` — i.e. launched directly from the project's own directory (the symlink's real target), with the workspace supplied via `--add-dir`. This is the only sanctioned outside-workspace case. Hint = that project. **In this case the project folder's own `.mcp.json` and `.claude/settings.json` are in effect, not the workspace's** — workspace-scoped MCP servers do not load (user-scope ones still do). Surface this plainly in the recap (step 6) so the engineer is not surprised by a different MCP/settings surface.
 - **Workspace-level** — cwd equals `<workspace>/`, or is under `<workspace>/` but not under `<workspace>/projects/<slug>/`. Hint = workspace-level work.
 - **Unregistered project** — cwd is under `<workspace>/projects/<slug>/` but `<slug>` is NOT in the registry. Hint = offer inline registration via `/setup-workspace add-project`.
-- **Outside workspace (refuse)** — cwd is not under `<workspace>/` **and** does not resolve to any registered project's clone. **Refuse and stop here.** Give a clear, specific message: the session was started outside the workspace and outside every registered project, so Memnyx cannot bind it to a project. Tell the user exactly what to do — `cd` into `<workspace>` (or into a registered project's clone) and rerun `/hello` — and, if they intended the current folder, that it is not a registered project (point them at `/setup-workspace add-project`, or at launching from the workspace).
+- **Outside workspace (refuse)** — cwd is not under `<workspace>/` **and** does not resolve to any registered project's directory. **Refuse and stop here.** Give a clear, specific message: the session was started outside the workspace and outside every registered project, so Memnyx cannot bind it to a project. Tell the user exactly what to do — `cd` into `<workspace>` (or into a registered project's own directory) and rerun `/hello` — and, if they intended the current folder, that it is not a registered project (point them at `/setup-workspace add-project`, or at launching from the workspace).
 
 ### 3. Load workspace-scope context
 
-Read all in parallel; skip silently if a file is missing:
+Read in parallel; skip silently if a file is missing:
 
 - `<workspace>/me/identity.md`
-- `<workspace>/.claude/memory/MEMORY.md`
-- `<workspace>/.claude/memory/lessons-learned.md`
 - `<workspace>/.claude/memory/project-context.md`
 
 Read the project registry directly from `<workspace>/.claude/projects-index.json` (registry mutations go via `/project-registry`; reads bypass it). Treat missing as empty.
+
+**Do NOT read `<workspace>/.claude/memory/MEMORY.md` here.** It is already in context — `CLAUDE.md` `@`-imports it at session boot, so re-reading only duplicates it. The distilled `MEMORY.md` *is* the session-orientation layer; you already have it.
+
+**Do NOT read `<workspace>/.claude/memory/lessons-learned.md`.** It is the raw append-inbox that `/lessons` and `/bye` consume — not session-start context. It grows without bound as lessons accumulate, so full-reading it at every session start is a cost that scales with history, for a file `/hello` doesn't use. The recap needs only a count: get it with `grep -c` (see step 6's Lessons line). Same rule at project scope (step 9). The principle is general: to report a metric about a large file, count it, never ingest it.
 
 Session narrative for the active workstream loads after workstream resolution at step 10 — not here.
 
@@ -46,7 +50,7 @@ List markers from:
 - `<workspace>/sessions/active/*.md` (workspace-level sessions)
 - `<workspace>/projects/*/sessions/active/*.md` (project-level sessions)
 
-For each, parse frontmatter (`project_slug`, `workstream_slug`, `open_item_slug`, `started_at`) and compute age. **Held purely for the recap at step 6** — informational only. No control-flow consumer in this skill; disambiguation work happens in step 11 against a workstream-local scan, not against this list.
+For each, extract the frontmatter fields (`project_slug`, `workstream_slug`, `open_item_slug`, `started_at`) and compute age. **Extract them with Bash (`grep`/`sed`), NOT the Read tool.** These markers span every scope, and a Read-tool touch of one under `projects/<slug>/sessions/active/` triggers that project's on-demand `CLAUDE.md` + `@`-import load — a *normal-subdirectory* read, which fires the nested-CLAUDE.md load (unlike a `.claude/` read, which does not). Reading all of them with the Read tool would side-load the full `CLAUDE.md` + `MEMORY.md` of **every project that has an active marker** — heavy, unrelated context this step doesn't need. This scan is metadata-only; keep it that way with Bash. **Held purely for the recap at step 6** — informational only. No control-flow consumer in this skill; disambiguation work happens in step 11 against a workstream-local scan, not against this list.
 
 ### 5. Run /mcp-doctor
 
@@ -58,15 +62,21 @@ Inline call in session mode. Surfaces server health to fold into the recap.
 Session Start
 =============
 Workspace:  <path>
-Cwd hint:   <workspace-level | project=<slug> | project=<slug> (external clone) | unregistered=<slug> | outside>
+Cwd hint:   <workspace-level | project=<slug> | project=<slug> (external path) | unregistered=<slug> | outside>
 Last session: <one-line summary, or "No previous sessions">
 Active sessions elsewhere: <list with ages, or "none">
 MCP status: <from /mcp-doctor>
-Lessons:    <N> conventions, <M> patterns
+Lessons:    <N> saved to memory · <M> raw notes not yet curated
 Identity:   loaded / placeholder
 ```
 
-**"Last session" sourcing.** Scan both `<workspace>/sessions/*.md` (workspace-level closed sessions) AND `<workspace>/projects/*/sessions/*.md` (project-level closed sessions). Sort by the date and time embedded in each filename — not raw lexicographic order, since the workstream slug between them makes that unreliable. Take the most recent; read its frontmatter for `project_slug` and `workstream_slug` to build the one-line summary. Output "No previous sessions" only when both globs return no files.
+**"Last session" sourcing.** Read the scope-neutral global pointer `<workspace>/.claude/.last-session` (alongside `projects-index.json`) — the most-recent session may belong to any project or to workspace level, and `/bye` writes this one pointer on every close with the just-closed session's `path`, `project_slug`, `workstream_slug`, and `closed_at`. The one-line summary comes straight from that single small read; no enumeration, no sort — O(1) regardless of how many closed sessions have accumulated or which scope owns the latest.
+
+Read the pointer with Bash (`cat`/`grep`) — it's a small data file at workspace scope, so the Read tool buys nothing here.
+
+**Fallback** (pointer absent, or its `path` no longer exists — resolve it as `<workspace>/<path>`, joining to the workspace located in step 1, **not** cwd: the stored `path` is workspace-relative, and under `--add-dir` / the `mmn` launcher cwd is routinely a registered project's own directory (the external-path case), not the workspace root, so a bare relative-path check would spuriously fail; also covers a workspace predating the pointer, or `/bye` never having run): scan both `<workspace>/sessions/*.md` and `<workspace>/projects/*/sessions/*.md`, sort by the date and time embedded in each filename — not raw lexicographic order, since the workstream slug between them makes that unreliable — take the most recent, and extract its frontmatter (`project_slug`, `workstream_slug`) with **Bash (`grep`/`sed`), not the Read tool** — same reason as step 4: the most-recent session can be a project file, and a Read-tool touch would side-load that project's `CLAUDE.md` + memory. Output "No previous sessions" only when the pointer is absent **and** both globs return no files.
+
+**"Lessons" line sourcing.** A *count*, never a full read — and never an invented breakdown. `MEMORY.md` is already in context (via the `@`-import); count its actual distilled bullet entries for `<N>` — a count of content already loaded, no I/O. (That's the asymmetry with `<M>` below: `<N>` is a context-count because `MEMORY.md` is loaded, whereas `<M>` needs a `grep -c` because `lessons-learned.md` is deliberately *not* loaded.) **Do NOT fabricate a "conventions vs patterns" split** — the file's section headings vary by scope (e.g. Feedback / Tool Usage / Conventions) and rarely match that label, so quoting made-up sub-counts is a fabrication. If a breakdown adds value, use the file's real section names; otherwise report the honest total. Get raw-inbox depth `<M>` from `grep -cE '^[-*] ' <workspace>/.claude/memory/lessons-learned.md` (matches both `-` and `*` list markers) — a count, not a read. Never load `lessons-learned.md` into context to produce this number. Keep the user-facing label plain ("saved to memory" / "raw notes not yet curated") — the recap orients users who don't know the distilled-vs-inbox memory model, so don't surface that jargon in the output.
 
 ### 7. Resolve project (open-ended)
 
@@ -74,7 +84,7 @@ Phrasing branches on the cwd hint. In every variant, be honest about inference a
 
 - **Workspace-level hint** → "What are you working on today? I'll infer whether to treat it as project work or workspace-level work and confirm before proceeding. You can also explicitly say 'register a new project' or 'this is a one-off task' to skip the inference."
 - **Registered-project hint** → "Looks like you're in `<slug>`. Continuing on that, or working on something else today? (If something else, I'll infer the scope and confirm — or you can ask me to register a new project.)"
-- **Registered-project (external clone) hint** → "You're in the `<slug>` clone (the workspace references it via symlink, and you launched with `--add-dir`). Continuing on `<slug>`, or something else? Heads-up: this session is using `<slug>`'s own MCP servers and settings, not the workspace's." Then resolve exactly as for the registered-project hint.
+- **Registered-project (external path) hint** → "You're in `<slug>`'s own directory (the workspace references it via symlink, and you launched with `--add-dir`). Continuing on `<slug>`, or something else? Heads-up: this session is using `<slug>`'s own MCP servers and settings, not the workspace's." Then resolve exactly as for the registered-project hint.
 - **Unregistered-project hint** → "`<slug>` isn't registered yet. Want me to register and scaffold it now (calls `/setup-workspace add-project`), or are you treating this as a one-off?"
 
 Resolution rules — match the registry first:
@@ -84,6 +94,8 @@ Resolution rules — match the registry first:
 3. **Explicit user override.** If the user explicitly says "register a new project" / "create a project" / "one-off task" / similar, honour that immediately without further inference. Explicit override always beats inference.
 4. **No match, user describes a new project** → fall through to step 8 (new-project handling).
 5. **No match, user confirms it's not project-bound** → set scope = workspace-level. Workspace-level is the fallback when no project fits — never the default for a topic shape.
+
+**Topic names the work, not the project.** Users often describe *what* they're doing, not which project owns it — and the work may live in a project other than the cwd hint. When the registry doesn't cleanly resolve scope from the topic, run the cross-project topic→workstream scan (the mechanism defined in step 10) *now* and let it surface candidate `<project> / <workstream>` pairs. A strong workstream match is itself evidence for its project — and since workstreams live only under registered projects, confirming one still honours "the registry is the source of truth for scope"; you're just reaching the registered project via the work the user named. Picking a candidate resolves scope **and** pre-identifies the workstream (step 10 then only loads it). If candidates span several projects, ask one focused disambiguation naming them — never silently guess one, never fall through to a generic question. This runs as soon as the topic is known (the ARGUMENTS, or the answer here), so it folds into the step 1–6 front-load batch when the topic arrived with the invocation.
 
 **Empty registry caveat.** When no projects are registered, paths 1–2 are unreachable; the resolver collapses to inference (paths 3–5) with no anchored confirmation. State this honestly in the question rather than pretending registry-backed matching is happening.
 
@@ -101,28 +113,39 @@ The project is now selected.
 
 ### 9. Layer project-scope context (when scope = project)
 
-Read in parallel; skip silently if missing:
-
-- `<workspace>/projects/<slug>/.claude/memory/MEMORY.md`
-- `<workspace>/projects/<slug>/.claude/memory/lessons-learned.md`
-- `<workspace>/projects/<slug>/.claude/memory/project-context.md`
+- **Read `<workspace>/projects/<slug>/CLAUDE.md` with the Read tool, then load its `@`-imports.** Use the Read tool (not Bash) — the injection side-channel that the check below keys on only fires on a Read-tool open; a Bash read never triggers it, so the check would always say "not injected" and you'd re-read every import (correct, but you lose the point of the check). Reading a project file *sometimes* makes the harness inject that project's `CLAUDE.md` `@`-imports (e.g. its `MEMORY.md`) into context as a separate system-reminder — and sometimes not; the behaviour is inconsistent and must not be relied on. So after reading the CLAUDE.md, for each file it `@`-imports (resolve each `@path` relative to the CLAUDE.md; skip any inside backticks or a fenced code block; follow only the **direct** imports the project CLAUDE.md declares — don't recurse into imports-of-imports, which today's project memory doesn't use): **did its content just arrive as a system-reminder injection right after your CLAUDE.md read? If not — or if you're unsure — read it yourself.** Prioritise never missing an import over avoiding a duplicate: a duplicate is cheap, but skipping a file that wasn't actually injected loses project memory (the failure this guards against). Checking for that *visible injection event* is reliable in a way that introspecting your whole context window is not. This tracks whatever the CLAUDE.md declares, so it stays correct as the project's imports change. (The Read tool's own *result* never resolves `@`-imports — the CLAUDE.md comes back with the literal `@…` line; imported content, when present, arrived via that separate injection, not the tool result.)
+- **Read `<workspace>/projects/<slug>/.claude/memory/project-context.md`** with the **Read tool** (domain context; skip silently if missing). Beyond its content, this Read is the reliable trigger for the project's skill discovery (below). It isn't a CLAUDE.md import — a separate read.
+- **Do NOT read `lessons-learned.md`** — raw inbox; `grep -c` for the recap count, never full-read (same rule as step 3).
 
 List `<workspace>/projects/<slug>/workstreams/*.md` (read on demand at step 10).
 
-**These reads are load-bearing beyond memory.** Reading a file under `<workspace>/projects/<slug>/` triggers Claude Code's on-demand discovery of that project's `.claude/skills/`, registering them as invocable skills (autocomplete included) for the rest of the session. Do not replace these reads with cached or pre-aggregated content — the discovery side effect is part of this step's contract. Discovery covers the skills format only; legacy `.claude/commands/` files in a project never register this way (they load when the session starts in that project, or via an explicit `--add-dir`/`/add-dir` — never on-demand).
+**Skill discovery is a separate mechanism — that's why `project-context.md` is read with the Read tool.** A Read/Edit-tool access to a file under `<workspace>/projects/<slug>/.claude/` registers that project's `.claude/skills/` (invocable, autocomplete included); Bash (`cat`/`sed`/`grep`) does not. The `project-context.md` read above is that trigger. It is independent of `@`-import loading — which is why the imports are handled by the check-then-fill above rather than assumed to arrive. Discovery covers the skills format only; legacy `.claude/commands/` files never register on-demand (they load when the session starts in that project, or via an explicit `--add-dir`/`/add-dir`).
 
-For workspace-level scope, the equivalents at `<workspace>/.claude/memory/` are already loaded in step 3; just list `<workspace>/workstreams/*.md`.
+For workspace-level scope, the memory at `<workspace>/.claude/memory/` is already loaded in step 3 — the workspace `CLAUDE.md` is the cwd's own file, so the harness loads it and expands its `@`-imports at launch (this is why the workspace `MEMORY.md` genuinely does arrive for free, unlike the project one). Just list `<workspace>/workstreams/*.md`.
 
 Session narrative for the active workstream loads after workstream resolution at step 10.
 
 ### 10. Resolve workstream
 
-To seed the hint: list `<scope>/sessions/*.md`, parse `<YYYY-MM-DD>` and `<HHMMSS>` from each filename, sort by parsed datetime descending, take the most recent. Extract the workstream slug from the filename (`<YYYY-MM-DD>-<workstream-slug>-<HHMMSS>-<6hex>.md` — the slug is the middle segment between the date and the timestamp). If no session files exist, skip the hint.
+Seed the hint by matching the user's stated topic against workstreams (a cheap, cross-project scan), and fall back to recency when there is no topic or no match:
 
-Phrasing branches on whether a recent session file was found:
+1. **Topic → workstream scan (cross-project, cheap).** Take the user's stated topic — the `/hello` ARGUMENTS if the invocation carried any, plus their step-7 answer — and `grep` it across **all** workstream files: `<workspace>/workstreams/*.md` and `<workspace>/projects/*/workstreams/*.md` (exclude archived workstreams once that mechanism exists). Not just the resolved scope — the user names the *work*, which may live in a project other than the cwd hint.
 
-- **Found** → "Last time you were on `<workstream-slug>`. Continue, or working on something else?"
-- **Not found** → "Which workstream are you on, or is this a new one?"
+   - **Scope the scan by corpus, not by filename-vs-content.** The whole workstream corpus is small (tens of files). `grep` reads them from disk in milliseconds and returns only the matching lines/filenames — the bodies do **not** enter context — so match against filenames *and* bodies freely. What stays strictly off-limits is content-scanning the large, numerous corpora — `sessions/`, `artifacts/`, and memory files — to find the work; never `grep` those here. The cheap/expensive line is *which corpus you scan*, not whether you read past the filename.
+   - **One query-expanded grep for candidate filenames.** Search the topic's key terms and a few obvious variants in a single pass (topic "security vulnerabilities" → `secur|vuln|cve|remediat`), returning **filenames** (`grep -ilE`), not matched lines. A handful of terms, for recall — expect some false positives (a broad term like `secur` matches an unrelated changelog line); you discard those at the peek. Filenames are bounded output (one line per hit); matched lines (`-in`) balloon across many hits and overflow/truncate, defeating the purpose. One call; when the topic arrived with the invocation this folds into the step 1–6 front-load batch. **Guard the globs against no-match** — suppress errors (`… 2>/dev/null`): the `<workspace>/projects/*/workstreams/*.md` glob expands to nothing on a fresh workspace or a project with no workstreams, and an unguarded unmatched glob makes `grep` error and can abort the scan. Treat zero hits as an empty candidate set and fall through to the recency fallback.
+   - **Narrow by filename, peek to describe, ingest only on selection.** From the candidate filenames, narrow to the few plausible ones by name, discarding obvious false positives. To write a useful disambiguation, **peek at the top of each narrowed candidate with `head` (Bash)** — header / status / first open items, a bounded few-line read. Use **Bash, not the Read tool**, for the peek: a Read-tool touch of a candidate *workstream* file (a normal project subdirectory, not `.claude/`) can trigger that project's nested-`CLAUDE.md` **load** — the harness side-loads that project's `CLAUDE.md` + its `@`-imported memory (observed: cross-scope `sessions/` reads did exactly this in a live run). You don't want a not-yet-picked candidate's whole project layered in. (This is the nested-CLAUDE.md load, distinct from skill discovery — discovery is `.claude/`-only and wouldn't fire on a `workstreams/` read anyway; the load is what a normal-subdir read triggers.) Reserve project-context layering for the *chosen* project at step 9. Read a workstream's **full** body only once the user picks it (or on a single unambiguous match). Do not scan `artifacts/` — even by filename — to corroborate: the workstream corpus is the only sanctioned discovery source; `sessions/`, `artifacts/`, and memory stay off-limits for finding the work.
+   - **Cross-project candidates drive scope too.** If matches span more than one project/scope, surface them all as `<project> / <workstream>` and ask one focused disambiguation. Picking a candidate in another project sets scope to that (registered) project — if step 7 has not already layered it, run step 9 for the chosen project before loading the workstream. When step 7 already ran this scan to resolve scope, reuse its result here; do not re-grep.
+
+2. **Recency fallback** (no topic, or the scan found nothing). List `<scope>/sessions/*.md`, parse `<YYYY-MM-DD>` and `<HHMMSS>` from each filename, sort by parsed datetime descending, take the most recent. Extract the workstream slug from the filename (`<YYYY-MM-DD>-<workstream-slug>-<HHMMSS>-<6hex>.md` — the slug is the middle segment between the date and the timestamp). If no session files exist, skip the hint.
+
+**Graceful degrade — a scan miss is never a dead end.** Fall to the recency hint; if that is empty too, just ask ("Which workstream are you on, or is this a new one?"). Do not escalate to content-grepping `sessions/` or `artifacts/` to force a match — that is the corpus the cost boundary protects.
+
+Phrasing branches on what seeded the hint:
+
+- **Topic match, one** → "Looks like your `<slug>` workstream — continue there, or something else?"
+- **Topic match, several (possibly cross-project)** → "Your description matches a few workstreams — which one? `<project>/<slug>`, `<project>/<slug>`, …"
+- **Recency match** → "Last time you were on `<workstream-slug>`. Continue, or working on something else?"
+- **No hint** → "Which workstream are you on, or is this a new one?"
 
 Resolution:
 
