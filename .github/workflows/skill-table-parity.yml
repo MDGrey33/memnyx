@@ -5,9 +5,11 @@ name: skill-table parity
 #                             the skill tables in README.md, CLAUDE.md, and
 #                             the generated-workspace template. See
 #                             scripts/check_skill_tables.py for the rationale.
-#   setup-workspace-tests   — regression tests for add_project.py's
-#                             CLAUDE.md generate/patch behavior. See
-#                             .claude/skills/setup-workspace/scripts/test_add_project.py.
+#   setup-workspace-tests   — regression tests for the setup-workspace scripts
+#                             (add_project.py CLAUDE.md generate/patch behavior,
+#                             fork-overlay source resolution) and the parity
+#                             checker's union logic. See the test_*.py files under
+#                             .claude/skills/setup-workspace/scripts/ and scripts/.
 
 # Least-privilege: both jobs only check out the repo and run a script,
 # so read-only access to contents is all either needs.
@@ -20,7 +22,7 @@ on:
       - ".claude/skills/**"
       - "README.md"
       - "CLAUDE.md"
-      - "scripts/check_skill_tables.py"
+      - "scripts/**"
   push:
     branches: [main]
 
@@ -43,5 +45,5 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pytest
-      - name: Test add_project.py (CLAUDE.md generate/patch behavior)
-        run: pytest .claude/skills/setup-workspace/scripts/test_add_project.py -v
+      - name: Test setup-workspace + parity-checker scripts
+        run: pytest .claude/skills/setup-workspace/scripts/ scripts/ -v
