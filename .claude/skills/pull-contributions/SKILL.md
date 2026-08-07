@@ -27,8 +27,9 @@ You are integrating generalized contributions from a project into Memnyx. This s
    ```
    /sanitizer <contributions-folder-path> --check --mode=boilerplate
    ```
-   - Exit code `0` → proceed.
-   - Exit code `1` → **halt**. Surface the sanitizer report. Do NOT pull any contribution with findings. Ask the user to run `/sanitizer <path> --apply` in the source project to fix, then re-run this skill.
+   - Verdict `CLEAN` → proceed.
+   - Verdict `FINDINGS_PRESENT` → **halt**. Surface the sanitizer report. Do NOT pull any contribution with findings. Ask the user to run `/sanitizer <path> --apply` in the source project to fix, then re-run this skill.
+   - Read the gate from the verdict, not from a process exit code — a skill runs inside the model turn and cannot set one.
    - Do not duplicate sanitization logic here — the sanitizer is the single source of truth for what leaks.
 
 3. **Review each contribution** (content check only, not PII/secret — that's sanitizer's job):
