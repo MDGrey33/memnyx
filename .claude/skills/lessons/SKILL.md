@@ -142,7 +142,7 @@ Triggered by `/lessons scan --deep`.
 
 Input source: the harness transcript directory for this workspace under `~/.claude/projects/` — raw transcripts, one file per session, turn-by-turn.
 
-Transcripts live only here — never in the workspace. The harness names each directory after the realpath of the session's working directory with path separators flattened (`/Users/me/workspace` → `-Users-me-workspace`), so resolve it by flattening `<workspace>` the same way and matching the candidate list rather than assuming a name.
+Transcripts live only here — never in the workspace. The harness names each directory after the **realpath** of the session's working directory with path separators flattened (`/Users/me/workspace` → `-Users-me-workspace`), so canonicalise `<workspace>` with `realpath` *before* flattening it and matching the candidate list. Skipping that step silently breaks the scan whenever the workspace is reached through a symlink — the flattened logical path matches nothing, and Mode C stops as though no transcripts existed.
 
 **Match the flattened path exactly, or as a prefix that ends at a separator.** A bare prefix match is wrong: a sibling workspace named `workspace2` flattens to a name that starts with the same characters as `workspace`, and multiple workspaces are supported. The separator condition keeps genuine descendants — sessions launched from a project clone under the workspace — while excluding the sibling. If nothing matches, report that and stop; never fall back to another root's transcripts, which belong to unrelated work and would ground proposals in evidence this workspace cannot check.
 
