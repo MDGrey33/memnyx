@@ -22,9 +22,9 @@ You are the last gate before any skill, doc, memory file, or markdown leaves the
 
 **Setup — resolve `<scope>` for the report path.** The skill's base directory is `<workspace>/.claude/skills/sanitizer/`; walk up three directory levels and check whether `<workspace>/.claude/.workspace` exists. If it does, look for the active session marker under `<workspace>/sessions/active/` and `<workspace>/projects/*/sessions/active/`, and match it to the **current session's identity** rather than taking whatever the glob returns. `<scope>` is `<workspace>` when the marker's `project_slug` is `workspace`, otherwise `<workspace>/projects/<project_slug>`.
 
-**Resolve `<scope>` only on exactly one match.** Concurrent sessions are supported, so the glob can legitimately return several markers belonging to different projects — picking one arbitrarily would file this scan's findings under somebody else's project. On zero or multiple candidates, leave `<scope>` unresolved and use the `/tmp` fallback.
+**A candidate is a marker whose `session_id` matches this session's** — recalled from context the way `bye` does it. A session with no marker of its own therefore has zero candidates, not one. Resolve `<scope>` only on exactly one candidate; on zero or several, leave it unresolved and use the `/tmp` fallback. Concurrent sessions are supported, so an unfiltered glob would happily return another project's marker and file this scan's findings under it — a headless pre-push run, which has no marker at all, is the easiest way to hit that.
 
-Unlike the skills that own a workspace, **never abort when this fails.** The sanitizer is deliberately callable on any path — `contribute` invokes it on a temp draft that lives outside any workspace. A failed resolution only decides where the report goes; it never blocks the scan. Scanning is the job; the report location is bookkeeping.
+Unlike the skills that own a workspace, **never abort when this fails.** Resolution fails when there is no `.claude/.workspace` above the skill, or no identity-matched marker — not because of where the scanned path is; scope is resolved from the skill's own location, never from the target. A failed resolution only decides where the report goes; it never blocks the scan. The sanitizer is deliberately callable on any path, including a temp draft outside any workspace, which is how `contribute` invokes it. Scanning is the job; the report location is bookkeeping.
 
 ## When to Use
 
@@ -53,7 +53,7 @@ When scanning a directory, always include `settings.json` — this is a prime lo
 
 **Never infer the mode from the path string.** Mode follows the content's *destination*, which a path substring does not report. Both directions fail in practice: a project merely named `boilerplate-something` is local work that would get needlessly strict scanning, while `<workspace>/contributions/` — a staging queue whose entire contents are bound for the boilerplate repo — contains no such substring and would get the *lightest* scan of the three.
 
-Every automated caller passes `--mode` explicitly (see Integration Points). On manual invocation without one, ask the user where the content is going. If that answer is unavailable, default to `--mode=boilerplate` and say so in the report. The asymmetry decides it: a false positive costs a line in a report the user dismisses, while a false negative under an open-source licence is an irrevocable grant (see the IP-boundary note above). Fail toward the strict mode.
+Every automated caller passes `--mode` explicitly (see Integration Points). On manual invocation without one, ask the user where the content is going; if that answer is unavailable, default to `--mode=boilerplate` and say so in the report. Fail toward the strict mode — the IP-boundary note above is why.
 
 ## Detection Categories
 
@@ -114,7 +114,7 @@ For every input file:
 3. Collect findings: `{file, line, category, excerpt, suggested_replacement, confidence}`.
 4. Write a report to `<scope>/artifacts/sanitizer/sanitizer-report-<YYYY-MM-DD-HHMM>-<rand>.md`, with `<scope>` resolved in Setup above. Fall back to `/tmp/sanitizer-report-<YYYY-MM-DD-HHMM>-<rand>.md` only when `<scope>` did not resolve. Never write reports into `contributions/` — that directory is the `/contribute` → `/pull-contributions` staging queue, and a report is skill output, not a contribution.
 
-   **Create the file exclusively, with an unpredictable suffix and mode `0600`** — fail rather than write if it already exists. This is the one place worth being prescriptive: a report may contain the very secrets the scan exists to protect, minute-granularity names collide between concurrent scans, and a predictable name in a world-writable `/tmp` lets a local process pre-create the path as a symlink and reroute the findings somewhere else entirely.
+   **Create the file from Bash (`umask 077`, `mktemp`), not the Write tool** — Write has no exclusive-create and lands 0644, so it satisfies none of the three properties and the threat goes unmitigated with nothing visibly failing. Be prescriptive here: a report may contain the very secrets the scan exists to protect, minute-granularity names collide between concurrent scans, and a predictable name in a world-writable `/tmp` lets a local process pre-create the path as a symlink and reroute the findings.
 5. Return report summary to the user: count per category, top 10 findings, path to full report.
 6. **Stop.** Do not modify any file.
 
@@ -189,7 +189,7 @@ printf '%s\n' "$out"
 [ "$(printf '%s\n' "$out" | tail -n 1)" = "SANITIZER_VERDICT=CLEAN" ] || exit 1
 ```
 
-The `|| exit 1` on the first line catches the CLI itself failing; the last-line comparison catches findings. Match the final line exactly — a substring search anywhere in the output reintroduces the spoofing hole. Both must pass for the push to proceed; a gate that fails open is not a gate.
+Match the final line exactly — a substring search anywhere in the output reintroduces the spoofing hole.
 
 ## Integration Points
 
@@ -199,6 +199,13 @@ After generating a contribution file, `contribute` invokes:
 /sanitizer <contribution-file-path> --mode=boilerplate
 ```
 If the verdict is `FINDINGS_PRESENT`, `contribute` blocks the stage and surfaces the report.
+
+**`scribe` calls sanitizer:**
+Before generated docs touch a shared repo, `scribe` invokes:
+```
+/sanitizer <destination> --mode=project
+```
+Project mode is deliberate: scribe writes a project's own docs into that project's own repo, where its codenames and domain terms are the content, not a leak. Strict mode would flag exactly what scribe is there to write, and `scribe` blocks on findings in its own output.
 
 **`pull-contributions` calls sanitizer:**
 Before integrating contributions into boilerplate, `pull-contributions` invokes:
@@ -240,7 +247,7 @@ Before any commit that publishes scanned content, re-run detect (`--check`) on t
 ## Output Conventions
 
 - Reports: `<scope>/artifacts/sanitizer/sanitizer-report-YYYY-MM-DD-HHMM-<rand>.md`, scope-resolved in Setup, with `/tmp/sanitizer-report-YYYY-MM-DD-HHMM-<rand>.md` as fallback when `<scope>` does not resolve. Created exclusively, mode `0600` (see Phase 1 step 4).
-- Never write findings content anywhere it could be shared, synced, or published — the findings themselves may contain the secrets you're trying to protect. `artifacts/` sits inside the workspace or project being scanned and is gitignored, so the scoped path satisfies this. The `/tmp` fallback is the one location outside the scanned tree that is allowed, and only because it is machine-local and transient; it is a last resort for scans with no resolvable workspace (a temp draft, say), never a convenience.
+- Never write findings content anywhere it could be shared, synced, or published — the findings themselves may contain the secrets you're trying to protect. `artifacts/` is gitignored at both workspace and project level, so the scoped path satisfies this. Note it is not necessarily inside the *scanned* tree — sibling layout puts the source repo outside the workspace, so scanning it still reports into the workspace. The `/tmp` fallback is the one location outside the scanned tree that is allowed, and only because it is machine-local and transient; it is a last resort for scans with no resolvable workspace (a temp draft, say), never a convenience.
 - `--check` mode prints a one-line summary to stdout; full details go to the report file.
 
 ## Examples
@@ -253,8 +260,8 @@ Before any commit that publishes scanned content, re-run detect (`--check`) on t
 /sanitizer ~/.claude/skills/setup-cognee/SKILL.md --mode=public
 → single file, checks secrets + PII + tone, keeps project terms
 
-/sanitizer ~/code/my-project/ --check
-→ CI gate, exits 1 if any finding
+/sanitizer ~/code/my-project/ --check --mode=project
+→ CI gate, ends with SANITIZER_VERDICT=CLEAN|FINDINGS_PRESENT; the wrapper turns that into an exit code
 
 apply
 → after a detect report is open, applies non-tone findings automatically,

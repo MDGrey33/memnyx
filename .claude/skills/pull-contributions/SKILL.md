@@ -19,7 +19,7 @@ You are integrating generalized contributions from a project into Memnyx. This s
 
 ## Steps
 
-1. **Locate contributions**: The user provides the path to `<workspace>/contributions/` (e.g., `~/workspace/contributions/`). Read all `.md` files in that folder **that do not start with `integrated-` or `skipped-`**. Files with the `integrated-` prefix have already been applied; files with the `skipped-` prefix were reviewed and rejected — skip both silently. `sanitizer-report-*.md` files are scan reports, not contributions — skip those too.
+1. **Locate contributions**: The user provides the path to `<workspace>/contributions/` (e.g., `~/workspace/contributions/`). Read all `.md` files in that folder **that do not start with `integrated-` or `skipped-`**. Files with the `integrated-` prefix have already been applied; files with the `skipped-` prefix were reviewed and rejected — skip both silently. `sanitizer-report-*.md` and `lessons-scan-*.md` files are skill output, not contributions — skip those too. Both skips protect workspaces still holding files written before those skills were routed to `artifacts/`; a deployed copy only changes on `/setup-workspace sync`, so the window stays open until each adopter syncs and migrates.
 
    If no path is provided, ask the user for it.
 

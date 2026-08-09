@@ -37,7 +37,7 @@ Scan active markers from `<workspace>/sessions/active/*.md` and `<workspace>/pro
 
 Modes A and B use `<scope>` for input/output paths. Mode C is workspace-wide; the marker is read for scope-attribution decoration only.
 
-`<scope>` is only ever the workspace root or a project directory — **a workstream is never a scope of its own.** Workspace-level and project-level workstreams both resolve to the scope containing them, `<workspace>` and `<workspace>/projects/<project_slug>` respectively; `workstream_slug` never routes input or output. A scan spans every workstream at its scope deliberately: recurrence across workstreams is the strongest signal the clustering step has, and routing per workstream would fragment clusters below Mode B step 4's threshold and suppress real proposals.
+`<scope>` is only ever the workspace root or a project directory — **a workstream is never a scope of its own.** Workspace-level and project-level workstreams both resolve to the scope containing them, `<workspace>` and `<workspace>/projects/<project_slug>` respectively; `workstream_slug` never routes input or output. A scan spans every workstream at its scope deliberately — cross-workstream recurrence is the signal clustering depends on.
 
 ---
 
@@ -209,4 +209,4 @@ This skill **detects** (finds what needs to change). `skills-manager` **governs*
 ## Downstream skills — do not duplicate
 
 - **`contribute`** operates on captured lessons to prepare upstream Memnyx contributions. Downstream of this skill.
-- **Never invoke `contribute` from here, and never write into `contributions/`.** A scan proposal is an unvalidated hypothesis carrying local evidence refs; a contribution is a generalised, human-reviewed claim. Deciding which proposals are worth upstreaming is the reviewer's judgment call, made after reading them — surface the option in the report and stop there.
+- **Never invoke `contribute` from here.** A scan proposal is an unvalidated hypothesis carrying local evidence refs; a contribution is a generalised, human-reviewed claim. Deciding which proposals are worth upstreaming is the reviewer's judgment call, made after reading them — surface the option in the report and stop there.
