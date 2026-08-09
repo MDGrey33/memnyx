@@ -140,7 +140,9 @@ Input source: `<scope>/sessions/*.md` — markdown summaries written by `/bye`. 
 
 Triggered by `/lessons scan --deep`.
 
-Input source: the harness transcript directory for this workspace under `~/.claude/projects/` — raw transcripts, one file per session, turn-by-turn.
+Input source: `<harness-transcript-dir>/*.jsonl` — raw harness transcripts, one file per session, turn-by-turn, where `<harness-transcript-dir>` is this workspace's directory under `~/.claude/projects/` (resolved below).
+
+**The `*.jsonl` glob is load-bearing — never widen it to the directory.** These directories are not flat: alongside the transcripts sit a per-session sidecar directory for each session id, holding spilled `tool-results`, and a `memory/` directory holding the harness's auto-memory. Walking either would pull raw tool output and the user's personal memory files into the scan, and evidence refs would then cite them in a proposal file.
 
 Transcripts live only here — never in the workspace. The harness names each directory after the **realpath** of the session's working directory with path separators flattened (`/Users/me/workspace` → `-Users-me-workspace`), so canonicalise `<workspace>` with `realpath` *before* flattening it and matching the candidate list. Skipping that step silently breaks the scan whenever the workspace is reached through a symlink — the flattened logical path matches nothing, and Mode C stops as though no transcripts existed.
 
