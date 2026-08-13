@@ -5,7 +5,9 @@ set -euo pipefail
 
 SKILLS_DIR="${HOME}/.claude/skills"
 CLAUDE_MD="${CLAUDE_MD:-./CLAUDE.md}"
-OUT_DIR="${OUT_DIR:-.claude/contributions}"
+# Skill output belongs under artifacts/<skill-slug>/, never in contributions/ --
+# that directory is the /contribute -> /pull-contributions staging queue.
+OUT_DIR="${OUT_DIR:-artifacts/finance-controller}"
 mkdir -p "$OUT_DIR"
 
 # Rough tokens-per-char: 1 token ≈ 4 chars (English, conservative).

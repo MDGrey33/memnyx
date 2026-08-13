@@ -19,7 +19,7 @@ You are integrating generalized contributions from a project into Memnyx. This s
 
 ## Steps
 
-1. **Locate contributions**: The user provides the path to `<workspace>/contributions/` (e.g., `~/workspace/contributions/`). Read all `.md` files in that folder **that do not start with `integrated-` or `skipped-`**. Files with the `integrated-` prefix have already been applied; files with the `skipped-` prefix were reviewed and rejected — skip both silently. `sanitizer-report-*.md` files are scan reports, not contributions — skip those too.
+1. **Locate contributions**: The user provides the path to `<workspace>/contributions/` (e.g., `~/workspace/contributions/`). Read all `.md` files in that folder **that do not start with `integrated-` or `skipped-`**. Files with the `integrated-` prefix have already been applied; files with the `skipped-` prefix were reviewed and rejected — skip both silently. `sanitizer-report-*.md` and `lessons-scan-*.md` files are skill output, not contributions — skip those too. Both skips protect workspaces still holding files written before those skills were routed to `artifacts/`; a deployed copy only changes on `/setup-workspace sync`, so the window stays open until each adopter syncs and migrates.
 
    If no path is provided, ask the user for it.
 
@@ -27,8 +27,9 @@ You are integrating generalized contributions from a project into Memnyx. This s
    ```
    /sanitizer <contributions-folder-path> --check --mode=boilerplate
    ```
-   - Exit code `0` → proceed.
-   - Exit code `1` → **halt**. Surface the sanitizer report. Do NOT pull any contribution with findings. Ask the user to run `/sanitizer <path> --apply` in the source project to fix, then re-run this skill.
+   - Verdict `CLEAN` → proceed.
+   - Verdict `FINDINGS_PRESENT` → **halt**. Surface the sanitizer report. Do NOT pull any contribution with findings. Ask the user to run `/sanitizer <path> --apply` in the source project to fix, then re-run this skill.
+   - Read the gate from the verdict, not from a process exit code — a skill runs inside the model turn and cannot set one.
    - Do not duplicate sanitization logic here — the sanitizer is the single source of truth for what leaks.
 
 3. **Review each contribution** (content check only, not PII/secret — that's sanitizer's job):

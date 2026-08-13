@@ -37,6 +37,8 @@ Scan active markers from `<workspace>/sessions/active/*.md` and `<workspace>/pro
 
 Modes A and B use `<scope>` for input/output paths. Mode C is workspace-wide; the marker is read for scope-attribution decoration only.
 
+`<scope>` is only ever the workspace root or a project directory — **a workstream is never a scope of its own.** Workspace-level and project-level workstreams both resolve to the scope containing them, `<workspace>` and `<workspace>/projects/<project_slug>` respectively; `workstream_slug` never routes input or output. A scan spans every workstream at its scope deliberately — cross-workstream recurrence is the signal clustering depends on.
+
 ---
 
 ## Mode A: CAPTURE (default)
@@ -104,7 +106,7 @@ Input source: `<scope>/sessions/*.md` — markdown summaries written by `/bye`. 
    - **evidence:** <session-file refs, e.g. `session-2026-04-19_144813.md:L42`>
    ```
 
-5. **Write proposal file** to `<workspace>/contributions/lessons-scan-<YYYY-MM-DD>-default.md` (mtime-check on write):
+5. **Write proposal file** to `<scope>/artifacts/lessons/lessons-scan-<YYYY-MM-DD>-default.md` (mtime-check on write), resolved as above — a workspace-scoped scan writes to `<workspace>/artifacts/lessons/`, a project-scoped scan to `<workspace>/projects/<project_slug>/artifacts/lessons/`. Output lands at the same scope the input was read from, whichever it is. Never `contributions/` — see Downstream skills.
    ```markdown
    # Lessons scan — default mode — <YYYY-MM-DD>
 
@@ -125,8 +127,11 @@ Input source: `<scope>/sessions/*.md` — markdown summaries written by `/bye`. 
    ```
    Scan mode: default
    Window: <N> files
-   Proposals written: <count> → <workspace>/contributions/lessons-scan-<date>-default.md
+   Proposals written: <count> → <scope>/artifacts/lessons/lessons-scan-<date>-default.md
    Skills-manager: triggered
+
+   Review the proposals. Any that generalise beyond this workspace can be staged
+   for upstream with /contribute — your call, per proposal.
    ```
 
 ---
@@ -135,7 +140,13 @@ Input source: `<scope>/sessions/*.md` — markdown summaries written by `/bye`. 
 
 Triggered by `/lessons scan --deep`.
 
-Input source: `~/.claude/projects/<your-project>/*.jsonl` — raw harness transcripts (one file per session, turn-by-turn).
+Input source: `<harness-transcript-dir>/*.jsonl` — raw harness transcripts, one file per session, turn-by-turn, where `<harness-transcript-dir>` is this workspace's directory under `~/.claude/projects/` (resolved below).
+
+**The `*.jsonl` glob is load-bearing — never widen it to the directory.** These directories are not flat: alongside the transcripts sit a per-session sidecar directory for each session id, holding spilled `tool-results`, and a `memory/` directory holding the harness's auto-memory. Walking either would pull raw tool output and the user's personal memory files into the scan, and evidence refs would then cite them in a proposal file.
+
+Transcripts live only here — never in the workspace. The harness names each directory after the **realpath** of the session's working directory with path separators flattened (`/Users/me/workspace` → `-Users-me-workspace`), so canonicalise `<workspace>` with `realpath` *before* flattening it and matching the candidate list. Skipping that step silently breaks the scan whenever the workspace is reached through a symlink — the flattened logical path matches nothing, and Mode C stops as though no transcripts existed.
+
+**Match the flattened path exactly, or as a prefix that ends at a separator.** A bare prefix match is wrong: a sibling workspace named `workspace2` flattens to a name that starts with the same characters as `workspace`, and multiple workspaces are supported. The separator condition keeps genuine descendants — sessions launched from a project clone under the workspace — while excluding the sibling. If nothing matches, report that and stop; never fall back to another root's transcripts, which belong to unrelated work and would ground proposals in evidence this workspace cannot check.
 
 ### Steps
 
@@ -157,7 +168,7 @@ Input source: `~/.claude/projects/<your-project>/*.jsonl` — raw harness transc
    - **evidence:** `010cbd9d-adb5-4730-8121-64c158238a39.jsonl:L1247`
    ```
 
-5. **Write proposal file** to `<workspace>/contributions/lessons-scan-<YYYY-MM-DD>-deep.md` (mtime-check on write; same structure as default-mode proposal, with `Mode: deep` and `Scope attribution: <workspace | projects/<slug> from marker>` in the header).
+5. **Write proposal file** to `<workspace>/artifacts/lessons/lessons-scan-<YYYY-MM-DD>-deep.md` (mtime-check on write; same structure as default-mode proposal, with `Mode: deep` and `Scope attribution: <workspace | projects/<slug> from marker>` in the header). Workspace root, not `<scope>` — this mode is workspace-wide by design, so its output belongs where its input does. Never `contributions/`.
 
 6. **Hand off to skills-manager** — same as default scan.
 
@@ -165,8 +176,11 @@ Input source: `~/.claude/projects/<your-project>/*.jsonl` — raw harness transc
    ```
    Scan mode: deep
    Window: <N> JSONL files (<total line count>)
-   Proposals written: <count> → <workspace>/contributions/lessons-scan-<date>-deep.md
+   Proposals written: <count> → <workspace>/artifacts/lessons/lessons-scan-<date>-deep.md
    Skills-manager: triggered
+
+   Review the proposals. Any that generalise beyond this workspace can be staged
+   for upstream with /contribute — your call, per proposal.
    ```
 
 ---
@@ -195,3 +209,4 @@ This skill **detects** (finds what needs to change). `skills-manager` **governs*
 ## Downstream skills — do not duplicate
 
 - **`contribute`** operates on captured lessons to prepare upstream Memnyx contributions. Downstream of this skill.
+- **Never invoke `contribute` from here.** A scan proposal is an unvalidated hypothesis carrying local evidence refs; a contribution is a generalised, human-reviewed claim. Deciding which proposals are worth upstreaming is the reviewer's judgment call, made after reading them — surface the option in the report and stop there.

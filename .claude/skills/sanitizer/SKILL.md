@@ -8,7 +8,7 @@ args: <path-or-glob> [--mode=boilerplate|public|project] [--check] [--apply]
 ## Model Selection
 
 - **Default model:** Sonnet — PII and tone judgment need reasoning; regex-only scans are not enough
-- **Deterministic parts:** regex scanning, path normalization, report file writes, `--check` exit-code logic — all scripted, no LLM
+- **Deterministic parts:** regex scanning, path normalization, report file writes, `--check` verdict emission — all scripted, no LLM
 - **Promote to Opus when:** sanitizing a large tree (20+ files) with many ambiguous tone findings
 - **Demote to Haiku when:** `--check` mode only (pure regex pass, no judgment)
 
@@ -20,13 +20,19 @@ You are the last gate before any skill, doc, memory file, or markdown leaves the
 
 **You never silently edit.** Detect → report → wait for approval → apply. Always.
 
+**Setup — resolve `<scope>` for the report path.** The skill's base directory is `<workspace>/.claude/skills/sanitizer/`; walk up three directory levels and check whether `<workspace>/.claude/.workspace` exists. If it does, look for the active session marker under `<workspace>/sessions/active/` and `<workspace>/projects/*/sessions/active/`, and match it to the **current session's identity** rather than taking whatever the glob returns. `<scope>` is `<workspace>` when the marker's `project_slug` is `workspace`, otherwise `<workspace>/projects/<project_slug>`.
+
+**A candidate is a marker whose `session_id` matches this session's** — recalled from context the way `bye` does it. A session with no marker of its own therefore has zero candidates, not one. Resolve `<scope>` only on exactly one candidate; on zero or several, leave it unresolved and use the `/tmp` fallback. Concurrent sessions are supported, so an unfiltered glob would happily return another project's marker and file this scan's findings under it — a headless pre-push run, which has no marker at all, is the easiest way to hit that.
+
+Unlike the skills that own a workspace, **never abort when this fails.** Resolution fails when there is no `.claude/.workspace` above the skill, or no identity-matched marker — not because of where the scanned path is; scope is resolved from the skill's own location, never from the target. A failed resolution only decides where the report goes; it never blocks the scan. The sanitizer is deliberately callable on any path, including a temp draft outside any workspace, which is how `contribute` invokes it. Scanning is the job; the report location is bookkeeping.
+
 ## When to Use
 
 - Before pushing to a boilerplate repo or any public repo
 - Invoked by `contribute` on every generated contribution
 - Invoked by `pull-contributions` as a `--check` gate
 - Manually on any file the user is about to publish, share, or commit publicly
-- Pre-commit / pre-push hook (via `--check` mode, exit 1 on findings)
+- Pre-commit / pre-push hook (via `--check` mode; the wrapper turns the verdict into an exit code)
 
 ## Scope Inputs
 
@@ -45,7 +51,9 @@ When scanning a directory, always include `settings.json` — this is a prime lo
 | `--mode=public` | Secrets + PII + tone. Keeps the user's public identity allowlist. Project context kept. Use for publish-ready public docs that legitimately reference the user. |
 | `--mode=project` (light) | Secrets + PII only. Keeps project codenames and context. Use inside a project's own repo where context is expected. |
 
-Default mode when called without `--mode`: infer from path. A path containing `boilerplate` → `boilerplate`. Anywhere else → `project`.
+**Never infer the mode from the path string.** Mode follows the content's *destination*, which a path substring does not report. Both directions fail in practice: a project merely named `boilerplate-something` is local work that would get needlessly strict scanning, while `<workspace>/contributions/` — a staging queue whose entire contents are bound for the boilerplate repo — contains no such substring and would get the *lightest* scan of the three.
+
+Every automated caller passes `--mode` explicitly (see Integration Points). On manual invocation without one, ask the user where the content is going; if that answer is unavailable, default to `--mode=boilerplate` and say so in the report. Fail toward the strict mode — the IP-boundary note above is why.
 
 ## Detection Categories
 
@@ -104,7 +112,9 @@ For every input file:
    - PRIVATE_CONTEXT: denylist substring match (word-boundary), mode-gated; suppress matches listed in `allowlist-context.txt` (applies to the judgment pass too)
    - TONE: LLM pass on suspicious paragraphs (flagged words `stupid`, `hate`, `idiot`, `[company] is`, etc.) — or full-file pass when model is Sonnet+
 3. Collect findings: `{file, line, category, excerpt, suggested_replacement, confidence}`.
-4. Write a report to the project's `.claude/contributions/sanitizer-report-<YYYY-MM-DD-HHMM>.md` (or `/tmp/sanitizer-report-...` if no `.claude/` dir exists).
+4. Write a report to `<scope>/artifacts/sanitizer/sanitizer-report-<YYYY-MM-DD-HHMM>-<rand>.md`, with `<scope>` resolved in Setup above. Fall back to `/tmp/sanitizer-report-<YYYY-MM-DD-HHMM>-<rand>.md` only when `<scope>` did not resolve. Never write reports into `contributions/` — that directory is the `/contribute` → `/pull-contributions` staging queue, and a report is skill output, not a contribution.
+
+   **Create the file from Bash (`umask 077`, `mktemp`), not the Write tool** — Write has no exclusive-create and lands 0644, so it satisfies none of the three properties and the threat goes unmitigated with nothing visibly failing. Be prescriptive here: a report may contain the very secrets the scan exists to protect, minute-granularity names collide between concurrent scans, and a predictable name in a world-writable `/tmp` lets a local process pre-create the path as a symlink and reroute the findings.
 5. Return report summary to the user: count per category, top 10 findings, path to full report.
 6. **Stop.** Do not modify any file.
 
@@ -112,7 +122,7 @@ Report format:
 ```markdown
 # Sanitizer Report
 **Scanned:** {N files}
-**Mode:** boilerplate
+**Mode:** {mode}
 **Date:** YYYY-MM-DD HH:MM
 **Verdict:** {CLEAN | FINDINGS_PRESENT}
 
@@ -163,16 +173,23 @@ Only runs when the user explicitly says apply or when invoked with `--apply`.
 ```
 
 - Runs Phase 1 only.
-- Exit code: `0` if zero findings, `1` if any finding in any category.
-- Writes report to stdout (condensed) and to the usual report file.
+- Writes the condensed report to stdout and the full report to the usual file.
+- **Ends stdout with exactly one machine-readable line, and nothing after it:** `SANITIZER_VERDICT=CLEAN` when no category has a finding, `SANITIZER_VERDICT=FINDINGS_PRESENT` otherwise. This final line is the gate signal.
 - Intended for pre-commit hooks and CI.
 
-To wire as a pre-push hook for the boilerplate repo:
+**Why a dedicated token on the last line, and not the report's own verdict.** The condensed report quotes findings verbatim, so anything a gate greps for anywhere in the output can be spoofed by a scanned file that happens to contain that text — a file carrying the words `Verdict: CLEAN` would pass a gate searching for them, exactly when the scan says otherwise. Emitting a distinct token as the final line makes the signal come from the skill rather than from arbitrary scanned content.
+
+**The wrapper owns the exit code, not this skill.** A skill runs inside a model turn and cannot set the calling process's exit status, so a hook must derive it from the verdict rather than expecting `claude` to fail. Wiring it as a pre-push hook for the boilerplate repo:
+
 ```bash
 # .git/hooks/pre-push
 #!/bin/sh
-claude skills run sanitizer "$(git rev-parse --show-toplevel)" --check --mode=boilerplate
+out=$(claude -p "/sanitizer $(git rev-parse --show-toplevel) --check --mode=boilerplate") || exit 1
+printf '%s\n' "$out"
+[ "$(printf '%s\n' "$out" | tail -n 1)" = "SANITIZER_VERDICT=CLEAN" ] || exit 1
 ```
+
+Match the final line exactly — a substring search anywhere in the output reintroduces the spoofing hole.
 
 ## Integration Points
 
@@ -181,14 +198,21 @@ After generating a contribution file, `contribute` invokes:
 ```
 /sanitizer <contribution-file-path> --mode=boilerplate
 ```
-If any findings, `contribute` blocks the stage and surfaces the report.
+If the verdict is `FINDINGS_PRESENT`, `contribute` blocks the stage and surfaces the report.
+
+**`scribe` calls sanitizer:**
+Before generated docs touch a shared repo, `scribe` invokes:
+```
+/sanitizer <destination> --mode=project
+```
+Project mode is deliberate: scribe writes a project's own docs into that project's own repo, where its codenames and domain terms are the content, not a leak. Strict mode would flag exactly what scribe is there to write, and `scribe` blocks on findings in its own output.
 
 **`pull-contributions` calls sanitizer:**
 Before integrating contributions into boilerplate, `pull-contributions` invokes:
 ```
 /sanitizer <contributions-dir> --check --mode=boilerplate
 ```
-Blocks pull if exit code ≠ 0.
+Blocks the pull unless the final line reads `SANITIZER_VERDICT=CLEAN`. A CLI failure is a separate condition from a `FINDINGS_PRESENT` verdict; the caller distinguishes them.
 
 **Manual invocation:** any time, any path.
 
@@ -209,6 +233,7 @@ Update these files directly when new patterns/names are discovered. Changes take
 - ❌ Strip matches from `allowlist-identity.txt` or `allowlist-context.txt` — allowlisted terms are never findings and never redacted
 - ❌ Run TONE detection in `--check` mode without Sonnet+ (regex tone detection produces false positives; skip or downgrade to word-flag only)
 - ❌ Scan files in `_archive/`, `node_modules/`, `.git/`, `venv/`, `.venv/`, or `__pycache__/`
+- ❌ Scan your own prior reports (`artifacts/sanitizer/`) — a report quotes the findings it reported, so scanning one re-flags every excerpt as a fresh finding. The noise is guaranteed and the signal is nil; worse, it inflates the `--check` gate's count and can fail a build over findings that were already handled
 - ❌ Follow symlinks outside the input root
 - ❌ Write replacements that reduce meaning — if stripping a term makes the sentence nonsensical, ask the user for rewrite, don't silently mangle
 - ❌ Rewrite flagged content that is demonstrably benign (e.g., a guard comment quoting the byte sequence it warns about) — record it as a known-benign exception in the report instead. Battle-tested wording encodes debugging evidence; the scan serves the artifact, not the reverse
@@ -221,22 +246,22 @@ Before any commit that publishes scanned content, re-run detect (`--check`) on t
 
 ## Output Conventions
 
-- Reports: `<project>/.claude/contributions/sanitizer-report-YYYY-MM-DD-HHMM.md` or `/tmp/sanitizer-report-YYYY-MM-DD-HHMM.md` as fallback.
-- Never write findings content to a location outside the scanned project — the findings themselves may contain the secrets you're trying to protect. Report stays local.
+- Reports: `<scope>/artifacts/sanitizer/sanitizer-report-YYYY-MM-DD-HHMM-<rand>.md`, scope-resolved in Setup, with `/tmp/sanitizer-report-YYYY-MM-DD-HHMM-<rand>.md` as fallback when `<scope>` does not resolve. Created exclusively, mode `0600` (see Phase 1 step 4).
+- Never write findings content anywhere it could be shared, synced, or published — the findings themselves may contain the secrets you're trying to protect. `artifacts/` is gitignored at both workspace and project level, so the scoped path satisfies this. Note it is not necessarily inside the *scanned* tree — sibling layout puts the source repo outside the workspace, so scanning it still reports into the workspace. The `/tmp` fallback is the one location outside the scanned tree that is allowed, and only because it is machine-local and transient; it is a last resort for scans with no resolvable workspace (a temp draft, say), never a convenience.
 - `--check` mode prints a one-line summary to stdout; full details go to the report file.
 
 ## Examples
 
 ```
-/sanitizer <path-to-boilerplate>/
-→ scans entire tree, mode=boilerplate (inferred), detect phase
+/sanitizer <path-to-boilerplate>/ --mode=boilerplate
+→ scans entire tree, detect phase (mode must be given — never inferred from the path)
 → report: 14 findings across 6 files
 
 /sanitizer ~/.claude/skills/setup-cognee/SKILL.md --mode=public
 → single file, checks secrets + PII + tone, keeps project terms
 
-/sanitizer ~/code/my-project/ --check
-→ CI gate, exits 1 if any finding
+/sanitizer ~/code/my-project/ --check --mode=project
+→ CI gate, ends with SANITIZER_VERDICT=CLEAN|FINDINGS_PRESENT; the wrapper turns that into an exit code
 
 apply
 → after a detect report is open, applies non-tone findings automatically,
