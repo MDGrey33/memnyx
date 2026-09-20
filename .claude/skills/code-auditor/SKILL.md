@@ -227,8 +227,9 @@ outside it.
 **Delegation must not break read-only.** More than one implementation can answer to the same
 command name, and at least one of them posts to the pull request as an unconditional step rather
 than behind a flag — so banning flags alone does not protect you. Before delegating: establish
-which implementation resolves (checking whether a marketplace plugin of that name is installed is
-the cheap version of this), pass no flag that comments, posts, or fixes, and if the resolved
+which implementation resolves (the cheap version is asking which one
+resolves *in this session*, not whether a marketplace copy exists — this machine carries four
+on-disk copies across three distribution channels, so presence proves nothing about resolution), pass no flag that comments, posts, or fixes, and if the resolved
 reviewer writes anywhere — a PR comment, the working tree, the repo — **do not call it.** Run
 those angles yourself and say so in the report. This skill's read-only property must survive
 delegation, or it was never a property.
