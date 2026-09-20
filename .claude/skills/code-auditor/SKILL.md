@@ -84,15 +84,36 @@ front of it. Tooling differs per language and per project, and a prescribed comm
   meant their working tree is auditing the wrong thing.
 - **Test gate.** *Always fires. Not optional, not an angle.* Answerable from source alone: does
   the repo have tests, does it declare coverage tooling, and do the symbols this change touches
-  appear anywhere in the test tree. A gate that fires every time is why test gaps stop going
+  appear anywhere tests are declared. **Read "the test tree" as wherever this language puts
+  tests**, which for many is not a separate directory — Rust unit tests live in `src` beside the
+  code, Go's sit in the same package, Python's may be inline. A gate that looks only in `tests/`
+  reports symbols as untested that are covered a few lines below their definition, and a false gap
+  costs the report its credibility as surely as a missed one. A gate that fires every time is why test gaps stop going
   unreported for months; an angle that looks for them reports them when it happens to notice.
   The judgment left to the model is whether a given absence *matters*, which is a real question
   — a missing test on a formatter is not a missing test on a permission check.
 - **Assertion-shape sweep.** *Always fires, over the test tree.* Mechanical: find assertions that
   **normalise an observation before asserting on it** — sorting or de-duplicating a sequence,
   collecting into a set, asserting a count where the claim is about order or position, matching a
-  substring where the claim is about *where* the text appears, or quantifying over a collection that
-  can be empty. Each hit is a candidate for a test whose body asserts strictly less than its name.
+  substring where the claim is about *where* the text appears, quantifying over a collection that
+  can be empty, **asserting a property the helper that produced the value already guarantees**, or
+  **putting every assertion behind a condition that may never hold**. Each hit is a candidate for a
+  test whose body asserts strictly less than its name.
+
+  The last two are the ones a reader most reliably passes over, because the assertion is about the
+  right subject and simply cannot be false. For the guarded shape the fix is a control: assert the
+  branch was entered at least once.
+
+  The guaranteed shape needs a procedure, because it cannot be seen in the assertion — the line
+  looks perfect, and the answer is in another function. **For every assertion on a measured
+  quantity — a length, a count, a width, a size, a position — open the helper that produced the
+  value and read it, including helpers defined in the test module or a shared test harness. Then
+  answer: what would that helper have to return for this assertion to fail, and can it?** A row
+  collected from exactly `width` cells can never be wider than `width`; a check that the *first*
+  item survived truncation can never fail, because truncation takes the last. Sweeping the test
+  file alone will not find these: the assertion and its guarantee are in different files, which is
+  precisely why they survive review. If the helper cannot produce a failing value, the assertion is
+  decoration — report it.
   The judgment left to the model is whether the discarded property is one the test's name, its
   comment, or an acceptance criterion actually claims — normalising is often exactly right, and a
   sweep that reported every sort would be noise. **Finding the candidates is not** a judgment, which
@@ -148,6 +169,11 @@ dropped or moved to unsettled — never reported as though it had.
 The diff is where you start, not where you stop. A change is often correct in isolation and
 wrong against the code around it, and that is the defect class a diff-scoped reader cannot see.
 
+- **One expansion question is standing, and it is about the change's own guards.** For every
+  assertion, gate or check the change *adds*: name the line of the code under test that could
+  change and make it fail. Any that has no such line is reported. This is the question an author
+  does not think to ask — the guard was written deliberately, so it feels examined — and it matters
+  most when the session that wrote the change is the one running the audit.
 - **Expansion is driven by a specific question**, never by general thoroughness. "Does any caller
   pass null here" justifies opening callers. "Let me understand this module" does not.
 - **Stop when the question is answered**, not when you run out of budget.
@@ -214,6 +240,10 @@ read the delegation as free and skip that step to "save" the pass.
 **Do not pin its internals.** Its depth varies by effort level and by model. Assume no
 particular internal pass ran. So:
 
+- **Do not publish a verdict while it is still running.** Wait for it, or mark the report
+  provisional and say so in the verdict line. It reads the change with different priors and
+  routinely returns findings no other pass raised; a report written without it can understate the
+  verdict badly, and a reader has no way to tell.
 - Treat its output as **candidates, not verdicts.** Put anything it returns that you intend to
   report through your own verifier. Agreement between two passes that have not seen each other's
   reasoning is real signal, but only once both are verified.
@@ -236,6 +266,37 @@ delegation, or it was never a property.
 
 If the built-in is simply unavailable, do the same: run the angles yourself and note in the
 report that the independence of a second pass was lost.
+
+## Cost discipline — spend where the findings are
+
+A full fan-out is affordable once and not weekly. Measured on one real branch (kybos, 28 files,
+2026-09-20): **1.09M sub-agent tokens**, of which the delegated diff pass was 19% and produced
+**every finding that was acted on**; the verifiers were 35% and produced none — their return was
+correcting five consequences and refuting one, which is real but is not discovery; the expansion
+agents were 29% and produced one blocker the delegated pass had already found, plus backlog.
+
+So spend in that order, and stop when the question is answered.
+
+- **Ladder, don't fan out.** Run the gates and the delegated pass **first, alone**. Read what comes
+  back, then dispatch expansion agents only for questions it left open, naming them. Dispatching
+  everything in parallel is how a routine change costs a million tokens: every pass is paid for
+  whether or not it was needed.
+- **One verifier, one read.** Batch every candidate into a single verifier rather than one per
+  theme. Four verifiers re-read the same three large files independently, which was most of that
+  35%. The exception stays: when the security gate fires, its findings get a second, independent
+  verifier, and a split is reported as a split.
+- **Hand over anchors, not files.** You have the shell; agents do not. Locate the lines first and
+  give each agent `file:line` ranges. An agent told to "read these ten test files" reads 4,000
+  lines to answer a question about 40 — that was 135k tokens in one dispatch.
+- **Budget the input as well as the output.** Every dispatch names the files, the ranges, the
+  output size and the shape. "Roughly 60 lines, findings only" is half of it; the other half is
+  "these files, these ranges, say so if you need more."
+- **A gate that fires on a comment is a gate that costs a premium agent.** Check the surface gate's
+  hits are in code before dispatching on them.
+
+Cheap by default, expensive on purpose: the full shape is for a release, a security-relevant
+change, or a report someone else will act on. For a routine branch, the delegated pass and the
+gates are most of the value.
 
 ## Agent dispatch
 
@@ -263,6 +324,13 @@ generic subagent carrying none of that guarantee, while still returning plausibl
 Run several in parallel, bounded: one unit to one context window, never an unbounded fleet.
 
 **No agent gets Bash.** Reproductions are described, not executed.
+
+**What that costs is yours to pay back.** An agent that cannot run anything ends findings with
+"this would be settled by rendering it / by the git history / by reading the vendored crate" — and
+you have the shell it does not. Before the report, **carry out every settling action a verifier
+named that is read-only and within your own permissions**, and record what it settled. Left undone,
+that is a finding parked in *Unsettled* with the answer one command away; done, it changes verdicts.
+It is also the one place where being the orchestrator beats being independent, so use it.
 
 **Never pass the caller's narrative to an agent.** Give it a target and a scope. An agent told
 "review the fix for the race condition" is looking for a race condition and confirming someone

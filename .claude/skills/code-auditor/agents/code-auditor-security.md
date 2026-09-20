@@ -80,6 +80,17 @@ concrete to attack.
   Reachability: <established | partial, and which link is unproven | untraced, and which file
   would settle it>
 
+## Not my class
+
+A defect you can reproduce but which is not a security defect does **not** go in Downgraded.
+Downgraded means *a security pattern that is present and not shown reachable*; a reachable
+bug that simply is not about security is a finding, and filing it as a downgrade buries it —
+the caller routes downgrades to "noticed, not blocking" without verification.
+
+List those separately, under this heading, each with its file:line and reproduction, and say
+plainly that you are handing it over rather than ranking it. The caller sends them through the
+same verifier as everything else.
+
 ## Downgraded
 - <pattern present but not shown reachable> — `file:NN` — what blocks it, or what you could not trace
 

@@ -38,6 +38,10 @@ Every candidate arrives carrying a verifier verdict. Route it:
 - **CAN'T-CONFIRM** → *Unsettled*, with what would settle it.
 - **Downgraded by the security pass** — a pattern present but not shown reachable → *Noticed, not
   blocking*, labelled as a downgrade, with what blocks reachability or what could not be traced.
+- **Handed over by the security pass as "not my class"** — a reproducible defect that is not a
+  security defect → **verify it like any other candidate**, then route by the list above. It is not
+  a downgrade and must never be filed as one: a downgrade skips verification by design, and this
+  did not fail to be reachable, it merely failed to be about security.
 
 Nothing reaches the report unrouted, and **nothing is published as a finding without a verdict** —
 an unverified candidate presented as real is the confident-false-positive failure. Downgrades are
