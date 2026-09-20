@@ -62,7 +62,8 @@ Lay it out however reads best for the change in hand. These must all be present:
   examined and not shown reachable. Neither is counted against the change. Recording the second is
   what makes "no security findings" mean something.
 - **Tests** — always present, because the gate always fires. What the repo has, what this change
-  did or did not add, which changed symbols are untested, and whether that matters here.
+  did or did not add, which changed symbols are untested, and whether that matters here. Name any
+  test the change touches whose assertions discard the property its name claims.
 - **Conventions honored** — which declared conventions were applied and what each suppressed.
   Present whenever the repo carries a review-context file.
 - **Coverage** — what was read, what was not and why, what was delegated, and whether anything

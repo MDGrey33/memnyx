@@ -59,7 +59,8 @@ function worth deleting.
 - **Summary** — what this repo is and what shape it is in, in a few sentences. **No overall score
   for the repo.** A single health number is exactly the arithmetic-laundering this skill avoids.
 - **Remediation plan** — the items, ranked. The order is the product.
-- **Tests** — coverage state, modules with no tests at all, untested paths that matter and why.
+- **Tests** — coverage state, modules with no tests at all, untested paths that matter and why,
+  and any test whose assertions discard the property its name claims.
 - **Duplication census** — what the corpus scan found, which clones are worth collapsing, which
   are coincidence, and **whether the census ran at all**. If no similarity tool was available,
   say so and say what was done instead.

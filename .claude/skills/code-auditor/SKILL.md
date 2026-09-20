@@ -88,6 +88,28 @@ front of it. Tooling differs per language and per project, and a prescribed comm
   unreported for months; an angle that looks for them reports them when it happens to notice.
   The judgment left to the model is whether a given absence *matters*, which is a real question
   — a missing test on a formatter is not a missing test on a permission check.
+- **Assertion-shape sweep.** *Always fires, over the test tree.* Mechanical: find assertions that
+  **normalise an observation before asserting on it** — sorting or de-duplicating a sequence,
+  collecting into a set, asserting a count where the claim is about order or position, matching a
+  substring where the claim is about *where* the text appears, or quantifying over a collection that
+  can be empty. Each hit is a candidate for a test whose body asserts strictly less than its name.
+  The judgment left to the model is whether the discarded property is one the test's name, its
+  comment, or an acceptance criterion actually claims — normalising is often exactly right, and a
+  sweep that reported every sort would be noise. **Finding the candidates is not** a judgment, which
+  is why this is a gate rather than an angle: a reader checking whether a test looks reasonable
+  passes over every one of these, because each one does look reasonable. It is also the only class
+  where the suite does not merely fail to catch a defect — it reports the property as holding. The
+  rigorous instrument here is **mutation testing**: a surviving mutant turns a vague worry about
+  test quality into a named assertion gap. It works by deliberately breaking the source, one small
+  fault at a time, and running the suite against each broken copy: a mutant the tests fail on is
+  caught, one they still pass is an assertion gap, located. **That copy is a scratch copy outside
+  the audited checkout, never the user's working tree** — read-only is untouched, because nothing is
+  fixed and nothing outside the output directory is written. What it does need is permission to run
+  the repo's own commands, so it stays behind the opt-in rule below: name the exact command, and
+  prefer handing it over to running it yourself. When it does run it needs its own controls, because
+  a mutation harness that fails to apply its mutation reports every mutant as survived, and one that
+  misreads a compile error for a caught mutant reports the reverse: one mutant the harness must
+  report as caught, and one deliberate break of the source it must report as invalid.
 - **Clone census.** Structural or token-level similarity across the corpus, not the diff.
   Finding candidate clones is mechanical and exhaustive; judging whether one is worth collapsing
   is not. A similarity tool already on the machine is not a repo-authored command and may be run.
