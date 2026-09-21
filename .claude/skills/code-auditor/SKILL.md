@@ -131,6 +131,14 @@ front of it. Tooling differs per language and per project, and a prescribed comm
   a mutation harness that fails to apply its mutation reports every mutant as survived, and one that
   misreads a compile error for a caught mutant reports the reverse: one mutant the harness must
   report as caught, and one deliberate break of the source it must report as invalid.
+
+  **And the mutant has to be able to distinguish the fix from its absence.** A mutant that cannot is not a passing
+  guard, it is a measurement of nothing — and it reads as the former. Three in one session: deleting a rule from a
+  `can_x` query could not make it disagree with the `x` it guards, because `x` delegates to the query, so both moved
+  together; closing one of two entry points into a state left the other open; and an assertion on the *first* item of
+  a truncated line could not fail, because truncation removes the last. Each was a step away from being recorded as
+  "the guard is asleep". So before trusting a mutant, name what it changes **that the assertion can observe** — and
+  where a fix and its guard share an implementation, mutate only one side of it.
 - **Clone census.** Structural or token-level similarity across the corpus, not the diff.
   Finding candidate clones is mechanical and exhaustive; judging whether one is worth collapsing
   is not. A similarity tool already on the machine is not a repo-authored command and may be run.
