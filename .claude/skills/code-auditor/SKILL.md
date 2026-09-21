@@ -108,9 +108,9 @@ front of it. Tooling differs per language and per project, and a prescribed comm
   looks perfect, and the answer is in another function. **For every assertion on a measured
   quantity — a length, a count, a width, a size, a position — open the helper that produced the
   value and read it, including helpers defined in the test module or a shared test harness. Then
-  answer: what would that helper have to return for this assertion to fail, and can it?** A row
-  collected from exactly `width` cells can never be wider than `width`; a check that the *first*
-  item survived truncation can never fail, because truncation takes the last. Sweeping the test
+  answer: what would that helper have to return for this assertion to fail, and can it?** A length
+  assertion on a buffer the helper sized to exactly that length can never fail; nor can a check on
+  the *first* element of a sequence, where the truncation it guards against removes the last. Sweeping the test
   file alone will not find these: the assertion and its guarantee are in different files, which is
   precisely why they survive review. If the helper cannot produce a failing value, the assertion is
   decoration — report it.
@@ -132,13 +132,11 @@ front of it. Tooling differs per language and per project, and a prescribed comm
   misreads a compile error for a caught mutant reports the reverse: one mutant the harness must
   report as caught, and one deliberate break of the source it must report as invalid.
 
-  **And the mutant has to be able to distinguish the fix from its absence.** A mutant that cannot is not a passing
-  guard, it is a measurement of nothing — and it reads as the former. Three in one session: deleting a rule from a
-  `can_x` query could not make it disagree with the `x` it guards, because `x` delegates to the query, so both moved
-  together; closing one of two entry points into a state left the other open; and an assertion on the *first* item of
-  a truncated line could not fail, because truncation removes the last. Each was a step away from being recorded as
-  "the guard is asleep". So before trusting a mutant, name what it changes **that the assertion can observe** — and
-  where a fix and its guard share an implementation, mutate only one side of it.
+  **And the mutant has to be able to distinguish the fix from its absence.** One that cannot is not a passing guard,
+  it is a measurement of nothing, and it reads as the former. Before trusting a mutant, name what it changes **that
+  the assertion can observe**. Two ways that fails: a fix and its guard share an implementation, so breaking it moves
+  both sides together and they agree — mutate one side only; or the mutant removes one of several routes to the state
+  under test, leaving the others, so nothing observable changes.
 - **Clone census.** Structural or token-level similarity across the corpus, not the diff.
   Finding candidate clones is mechanical and exhaustive; judging whether one is worth collapsing
   is not. A similarity tool already on the machine is not a repo-authored command and may be run.
@@ -277,25 +275,25 @@ report that the independence of a second pass was lost.
 
 ## Cost discipline — spend where the findings are
 
-A full fan-out is affordable once and not weekly. Measured on one real branch (kybos, 28 files,
-2026-09-20): **1.09M sub-agent tokens**, of which the delegated diff pass was 19% and produced
-**every finding that was acted on**; the verifiers were 35% and produced none — their return was
-correcting five consequences and refuting one, which is real but is not discovery; the expansion
-agents were 29% and produced one blocker the delegated pass had already found, plus backlog.
-
-So spend in that order, and stop when the question is answered.
+A full fan-out is affordable once and not weekly — measured on a mid-sized branch it ran to seven
+figures of sub-agent tokens. Where that went is the useful part, and the ordering is what to spend
+against: the **delegated diff pass** was the smallest share and produced every finding that was
+acted on; the **verifiers** cost more than everything that found a blocker and discovered nothing —
+their return is correcting a consequence or refuting a claim, which is worth paying for and is not
+discovery; the **expansion agents** cost nearly as much again and mostly re-found what the delegated
+pass already had. Treat those three as the spending order, and stop when the question is answered.
 
 - **Ladder, don't fan out.** Run the gates and the delegated pass **first, alone**. Read what comes
   back, then dispatch expansion agents only for questions it left open, naming them. Dispatching
   everything in parallel is how a routine change costs a million tokens: every pass is paid for
   whether or not it was needed.
 - **One verifier, one read.** Batch every candidate into a single verifier rather than one per
-  theme. Four verifiers re-read the same three large files independently, which was most of that
-  35%. The exception stays: when the security gate fires, its findings get a second, independent
+  theme. Verifiers dispatched one per theme each re-read the same large files, and that duplicated
+  reading is most of what they cost. The exception stays: when the security gate fires, its findings get a second, independent
   verifier, and a split is reported as a split.
 - **Hand over anchors, not files.** You have the shell; agents do not. Locate the lines first and
-  give each agent `file:line` ranges. An agent told to "read these ten test files" reads 4,000
-  lines to answer a question about 40 — that was 135k tokens in one dispatch.
+  give each agent `file:line` ranges. An agent told to read a directory will read all of it to
+  answer a question about a few lines, because it has no cheaper way to find them.
 - **Budget the input as well as the output.** Every dispatch names the files, the ranges, the
   output size and the shape. "Roughly 60 lines, findings only" is half of it; the other half is
   "these files, these ranges, say so if you need more."
