@@ -81,7 +81,11 @@ front of it. Tooling differs per language and per project, and a prescribed comm
 
 - **Scope.** What is under audit, resolved concretely. In review mode that means the real diff,
   including uncommitted work — a review that silently audits the last commit while the user
-  meant their working tree is auditing the wrong thing.
+  meant their working tree is auditing the wrong thing. Scope includes the **targets CI builds
+  for**: a change can be clean on the host and broken on another target — a platform-gated item
+  left unused elsewhere. Name every target the CI builds; where a local toolchain exists for one,
+  offer its lint under the opt-in rule below, with the exact command; and say in Coverage which
+  targets were not checked.
 - **Test gate.** *Always fires. Not optional, not an angle.* Answerable from source alone: does
   the repo have tests, does it declare coverage tooling, and do the symbols this change touches
   appear anywhere tests are declared. **Read "the test tree" as wherever this language puts
@@ -97,8 +101,10 @@ front of it. Tooling differs per language and per project, and a prescribed comm
   collecting into a set, asserting a count where the claim is about order or position, matching a
   substring where the claim is about *where* the text appears, quantifying over a collection that
   can be empty, **asserting a property the helper that produced the value already guarantees**, or
-  **putting every assertion behind a condition that may never hold**. Each hit is a candidate for a
-  test whose body asserts strictly less than its name.
+  **putting every assertion behind a condition that may never hold**, **naming a user action while
+  sending something that action never produces**, or **asserting what a test was changed to assert,
+  where the change removed what it used to forbid**. Each hit is a candidate for a test whose body
+  asserts strictly less than its name.
 
   The last two are the ones a reader most reliably passes over, because the assertion is about the
   right subject and simply cannot be false. For the guarded shape the fix is a control: assert the
@@ -114,6 +120,16 @@ front of it. Tooling differs per language and per project, and a prescribed comm
   file alone will not find these: the assertion and its guarantee are in different files, which is
   precisely why they survive review. If the helper cannot produce a failing value, the assertion is
   decoration — report it.
+  The action shape needs the same treatment, one level out: **for a test named after a key, a click
+  or a command, trace what the user's action actually delivers to the code under test.** A test named
+  for the `q` key that sent a `Quit` variant could not fail for `q`, because the key arrives as a
+  letter and becomes a quit further in; it passed over a live defect and read as coverage (kybos
+  F121). And when a test is *edited* to fix behaviour, ask what it used to forbid: a banner fix
+  removed the only assertion about what that render path may not draw, after which a build making a
+  real ceremony announce itself as practice passed every test in the workspace (F126). A test changed
+  to assert something new is the likeliest place for a guard to vanish, because the diff looks like an
+  improvement.
+
   The judgment left to the model is whether the discarded property is one the test's name, its
   comment, or an acceptance criterion actually claims — normalising is often exactly right, and a
   sweep that reported every sort would be noise. **Finding the candidates is not** a judgment, which
@@ -144,8 +160,13 @@ front of it. Tooling differs per language and per project, and a prescribed comm
   in scope** — slower, less exhaustive, and honest about being so. Do not install anything. A
   census that silently does not run is the reassuring-silence failure wearing a checkmark.
 - **Security surface check.** Does the change touch auth, input handling, secrets, file or
-  network I/O, serialization, SQL, or permissions. This decides whether the security agent is
-  dispatched and whether its findings escalate. A gate decides, not a feeling about the diff.
+  network I/O, serialization, SQL, or permissions — **and does input cross into it from a
+  principal other than the one running the code**: the network, another user, a fork's pull
+  request, an untrusted file, or a secret passing through. Both halves, because the first alone
+  fires on a local script reading a path its own operator typed, and a premium agent then spends
+  itself on a boundary nobody crosses. Name the crossing principal in one line; where there is
+  none, say so and skip the agent. This decides whether the security agent is dispatched and
+  whether its findings escalate. A gate decides, not a feeling about the diff.
 
 **Running the repo's own commands is opt-in and never implicit.** These gates are answerable by reading
 and searching. Running the repo's own test or coverage commands would mean executing strings the
@@ -265,10 +286,16 @@ command name, and at least one of them posts to the pull request as an unconditi
 than behind a flag — so banning flags alone does not protect you. Before delegating: establish
 which implementation resolves (the cheap version is asking which one
 resolves *in this session*, not whether a marketplace copy exists — this machine carries four
-on-disk copies across three distribution channels, so presence proves nothing about resolution), pass no flag that comments, posts, or fixes, and if the resolved
-reviewer writes anywhere — a PR comment, the working tree, the repo — **do not call it.** Run
-those angles yourself and say so in the report. This skill's read-only property must survive
-delegation, or it was never a property.
+on-disk copies across three distribution channels, so presence proves nothing about resolution), pass no flag that comments, posts, or fixes.
+**Then distinguish two kinds of write.** An *outward* write — a PR comment, a posted review,
+anything another person sees — is disqualifying: do not call it, run those angles yourself, and say
+so in the report. A write *inside the checkout* that the reviewer reverts is not disqualifying, and
+is how a competent reviewer verifies a guard: it applies a mutant, watches a test fail, and puts the
+file back (measured, kybos 2026-09-27). That is permitted, and it costs you three duties.
+**Delegate only from a clean tree** — a mutant plus a failed revert lands on uncommitted work, and
+the caller is who loses it. **Verify afterwards**: `git status` clean, HEAD unchanged, no stash
+added. **Report that it wrote and was verified**, because a read-only claim nobody checked is not a
+property.
 
 If the built-in is simply unavailable, do the same: run the angles yourself and note in the
 report that the independence of a second pass was lost.
@@ -289,8 +316,12 @@ pass already had. Treat those three as the spending order, and stop when the que
   whether or not it was needed.
 - **One verifier, one read.** Batch every candidate into a single verifier rather than one per
   theme. Verifiers dispatched one per theme each re-read the same large files, and that duplicated
-  reading is most of what they cost. The exception stays: when the security gate fires, its findings get a second, independent
-  verifier, and a split is reported as a split.
+  reading is most of what they cost. The exception is narrower than it looks: a second, independent
+  verifier goes out only **after** the first routes a security finding to *Blockers*, because a
+  second opinion is worth paying for on what would stop a release and worth nothing on a finding
+  already downgraded. Dispatched in parallel on a finding the first pass then downgrades, it is
+  pure duplication — measured at a fifth of one run's spend, agreeing on every point (kybos,
+  2026-09-22).
 - **Hand over anchors, not files.** You have the shell; agents do not. Locate the lines first and
   give each agent `file:line` ranges. An agent told to read a directory will read all of it to
   answer a question about a few lines, because it has no cheaper way to find them.
@@ -299,6 +330,13 @@ pass already had. Treat those three as the spending order, and stop when the que
   "these files, these ranges, say so if you need more."
 - **A gate that fires on a comment is a gate that costs a premium agent.** Check the surface gate's
   hits are in code before dispatching on them.
+- **Settle by running before you verify, wherever one safe command decides it.** A claim about
+  shell semantics, an exit code, a flag's effect or a file's existence is cheaper to run than to
+  reason about, and reasoning gets it wrong: a claim that a script exits 1 where it documents 2
+  survived two independent finders and a verifier, and one command refuted it (kybos, 2026-09-22).
+  Run it yourself first — read-only, within your own permissions — and dispatch the verifier only
+  with what is left. This is the ladder applied to verification, and it is the one place where
+  having the shell beats having independence.
 
 Cheap by default, expensive on purpose: the full shape is for a release, a security-relevant
 change, or a report someone else will act on. For a routine branch, the delegated pass and the
@@ -320,9 +358,10 @@ generic subagent carrying none of that guarantee, while still returning plausibl
   not by translating: *established* becomes CONFIRMED, *partial* becomes PLAUSIBLE (trigger),
   *untraced* becomes CAN'T-CONFIRM — each re-checked against source rather than accepted at its
   stated strength. One verifier is enough for most findings.
-  When the security surface gate fires, security findings get a second verifier that has not seen
-  the first's verdict; **a split is reported as a split, never averaged.** The finding ships with
-  both verdicts and the human adjudicates.
+  When the first verifier routes a security finding to *Blockers*, that finding gets a second
+  verifier that has not seen the first's verdict; **a split is reported as a split, never
+  averaged.** The finding ships with both verdicts and the human adjudicates. Below that bar one
+  verifier is the whole pass.
 - **`code-auditor:code-auditor-security`** — dispatched whenever the surface gate fires, and on
   any change the gate cannot classify. When the gate clears every surface, say so in one line
   rather than spending an agent.

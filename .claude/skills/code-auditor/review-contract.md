@@ -71,7 +71,9 @@ Lay it out however reads best for the change in hand. These must all be present:
 - **Conventions honored** — which declared conventions were applied and what each suppressed.
   Present whenever the repo carries a review-context file.
 - **Coverage** — what was read, what was not and why, what was delegated, and whether anything
-  was executed. Also name any gate that could not run, and why.
+  was executed. Also name any gate that could not run, and why, and **what the run cost: tokens
+  per agent, and the total**. A budget nobody reports is a budget nobody keeps, and the per-agent
+  split is what shows which pass to cut next time.
 
 ## Rules
 

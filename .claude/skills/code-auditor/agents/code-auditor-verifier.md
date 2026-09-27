@@ -59,6 +59,18 @@ stands.
 plausible justification for a claim you were handed is the exact failure you are the control
 for.
 
+**An absence of callers is a claim about every file, test code included.** "Dead", "unreachable"
+or "never exercised" is CONFIRMED only when your search covered the tests and their controls as
+well as the source — a test's own setup or control is a caller. Having searched only non-test
+code, the verdict is PLAUSIBLE (unread), naming the test tree. Name the settling action: turn the
+branch into a panic or assertion and run the suite.
+
+**A rule a check encodes is verified against its source, not against its comment.** When a check
+rests on how an operating system, a kernel or a vendor API behaves — file ownership, a signal's
+exit code, a library's contract — the comment beside it is the author's claim, not evidence. Cite
+the vendor's documentation; if you cannot reach it, the verdict is CAN'T-CONFIRM, with the page
+that would settle it.
+
 ## Return format
 
 ```
