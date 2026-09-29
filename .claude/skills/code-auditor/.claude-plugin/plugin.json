@@ -1,0 +1,9 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "code-auditor",
+  "version": "0.1.0",
+  "description": "Independent, adversarial code audit. Reviews a change or inspects a whole repo for security, logic, duplication, over-engineering and test adequacy. Sub-agents run in isolated contexts, so a finding is judged against source rather than against the author's account of the change. Composes with a diff-scoped reviewer rather than replacing it. Read-only.",
+  "skills": [
+    "./"
+  ]
+}

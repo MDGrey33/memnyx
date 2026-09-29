@@ -83,6 +83,7 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 | `/claude-slash-commands` | Version-pinned reference for every built-in Claude Code slash (`/`) command — what each does, aliases, which are Skills/Workflows vs fixed built-ins — plus how to author custom `/commands`. Includes the `/loop` vs `/schedule` breakdown. |
 | `/claude-cli-flags` | Version-pinned reference for every Claude Code CLI flag, classified by whether it works in an interactive session, a headless (`-p`) session, or both, with the canonical launch recipes for each mode. |
 | `/scribe` | Generate or maintain a project's Claude-facing docs (`CLAUDE.md`, `.claude/docs/*`, project-context, README) from verified facts. Fast pass commits directly-readable signals; `--deep` dispatches a `scribe:scribe-explorer` per subsystem plus an independent `scribe:scribe-verifier` pass, routing unconfirmed claims to a hazards artifact. Packaged as a skills-directory plugin — autoloads as `scribe@skills-dir`, bundling its two agents. |
+| `/code-auditor` | Independent, adversarial code audit. `--review` judges a change (working diff, PR, branch, path) and never scores; `--inspect` scores a repo into a ranked remediation plan. Owns security, test adequacy, corpus-wide duplication, and expansion beyond the change into surrounding code; delegates the diff-scoped pass to the built-in reviewer rather than reimplementing it. Read-only — it reports and never fixes. Packaged as a skills-directory plugin — autoloads as `code-auditor@skills-dir`, bundling its three read-only agents (`code-auditor-examiner`, `code-auditor-verifier`, `code-auditor-security`). |
 | `/google-script-deploy` | Deploy an HTML file as a Google Apps Script web app with a stable URL. Called by other skills (e.g. a dashboard-generating skill) with a `sourceDir` argument; handles clasp setup, auth, project creation, and in-place redeploys. |
 | `/security-snapshot` | Full security pipeline — AWS Inspector V2 + GitHub security alerts → correlation → self-contained HTML dashboard with trend history. Org config in `scripts/config.local.json` (gitignored; overlays the committed template); first run prompts for it. Run monthly or on demand. |
 | `/coordinated-integration-testing` | Automatic (core principle, not user-invocable) — enforces coordinated integration testing on any system change: identify tool/hook/service dependencies before building, check what's actively running before testing, require all 4 test levels (unit/component/integration/system), and document results before declaring a change ready. |
@@ -100,6 +101,7 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 - `/contribute` → `/sanitizer` (blocks staging on any finding)
 - `/pull-contributions` → `/sanitizer --check` (blocks pull on any finding)
 - `/scribe` → `/sanitizer` (blocks on findings in generated docs)
+- `/code-auditor` → the built-in diff reviewer (delegated, never re-implemented; refused if it would post or write) → `/sanitizer` (before a report leaves the workspace)
 
 ## Skills Governance
 
