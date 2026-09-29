@@ -146,7 +146,10 @@ front of it. Tooling differs per language and per project, and a prescribed comm
   prefer handing it over to running it yourself. When it does run it needs its own controls, because
   a mutation harness that fails to apply its mutation reports every mutant as survived, and one that
   misreads a compile error for a caught mutant reports the reverse: one mutant the harness must
-  report as caught, and one deliberate break of the source it must report as invalid.
+  report as caught, and one deliberate break of the source it must report as invalid. Restore each
+  mutated file so it is newer than the mutant's build — write the text back rather than moving an
+  older copy into place: a build tool that decides what to rebuild by timestamp otherwise keeps the
+  mutant compiled, and the next run tests the mutant.
 
   **And the mutant has to be able to distinguish the fix from its absence.** One that cannot is not a passing guard,
   it is a measurement of nothing, and it reads as the former. Before trusting a mutant, name what it changes **that
