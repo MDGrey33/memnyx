@@ -21,12 +21,13 @@ data, and fails on any unclassified field.
 Regenerate a set from real snapshots (writes nothing if the leak check fails):
 
 ```bash
-python3 scripts/fixture_mask.py --reports-dir <reports dir> --dates <d1> <d2> --out tests/fixtures/<set> --alert-repos 5
+python3 scripts/fixture_mask.py --reports-dir <reports dir> --dates <d1> <d2> --out tests/fixtures/<set> --alert-repos 2 --code-scanning 50
 ```
 
 A field added to any collector must be classified in `FIELD_ROLES` before the
 masker will run — as an identifier role, or as `PUBLIC`.
 
-`--alert-repos 5` keeps per-alert GitHub detail for the five repos with most alerts on
-the newest date, the same five on every date. That detail is most of a snapshot's size
-and no test asserts on its totals; the aggregates stay whole.
+`--alert-repos 2` keeps per-alert GitHub detail for the two repos with most alerts on
+the newest date, the same two on every date. `--code-scanning 50` keeps 50
+code-scanning alerts per date, which only the dashboard build counts. That detail
+is most of a snapshot's size and no test asserts on its totals; the aggregates stay whole.

@@ -146,6 +146,7 @@ M = [  # (name, file, old, new, test that must fail)
  ('failed captures called an old snapshot', 'scripts/movement_markdown.py', '        why = ("the captures behind them failed; see Data quality." if failed', '        why = ("this snapshot predates the lever capture." if failed', 'test_review_fixes.TestSecondReview.test_failed_captures_are_not_described_as_an_old_snapshot'),
  ('non-dated folders embedded', 'scripts/build_dashboard.py', '        if re.fullmatch(r"\\d{8}", f.parent.name):', '        if True:', 'test_review_fixes.TestBuiltPage.test_page_builds_from_fixtures_with_every_placeholder_filled'),
  ('a placeholder left unfilled', 'scripts/build_dashboard.py', '        "__ANNOTATIONS__":  js_literal(ANNOTATIONS),\n', '', 'test_review_fixes.TestBuiltPage.test_page_builds_from_fixtures_with_every_placeholder_filled'),
+ ('code-scanning cap ignored', 'scripts/fixture_mask.py', 'key=lambda a: json.dumps(a, sort_keys=True))[:cap]', 'key=lambda a: json.dumps(a, sort_keys=True))', 'test_fixture_mask.TestMasking.test_code_scanning_trim_caps_each_date_stably'),
  ("checker never sees files", "tests/test_fixtures_clean.py", "        checked += 1", "        continue", "test_fixtures_clean.TestCommittedFixtures.test_fixtures_are_masked"),
 ]
 env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")

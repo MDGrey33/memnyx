@@ -75,6 +75,15 @@ class TestMasking(unittest.TestCase):
             self.assertEqual({a["repo"] for a in out[date]["github-raw.json"]["vuln_alerts_detail"]}, {"b", "c"})
         self.assertEqual(len(out["20260101"]["github-raw.json"]["vuln_alerts_detail"]), 3)
 
+    def test_code_scanning_trim_caps_each_date_stably(self):
+        s = {d: {"github-raw.json": {"code_scanning": [{"rule_id": f"r{i}"} for i in range(n)]}}
+             for d, n in (("20260101", 5), ("20260115", 2))}
+        out = fm.trim_code_scanning(s, 3)
+        self.assertEqual([len(out[d]["github-raw.json"]["code_scanning"]) for d in s], [3, 2])
+        self.assertEqual(out, fm.trim_code_scanning(s, 3))
+        with self.assertRaises(ValueError):
+            fm.trim_code_scanning(s, 0)
+
     def test_fake_values_do_not_depend_on_real_values(self):
         a, _ = fm.mask_set(_set())
         s = _set()

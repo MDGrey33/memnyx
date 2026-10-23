@@ -316,6 +316,21 @@ def trim_alert_detail(snapshot_set: dict, keep_repos: int) -> dict:
     return out
 
 
+def trim_code_scanning(snapshot_set: dict, cap: int) -> dict:
+    """Keep at most `cap` code-scanning alerts per date, in a stable order. Only the
+    dashboard counts them; the movement code never reads the list."""
+    if cap < 1:
+        raise ValueError("cap must be at least 1")
+    out = {}
+    for date, files in snapshot_set.items():
+        out[date] = dict(files)
+        gh = files.get("github-raw.json")
+        if isinstance(gh, dict) and isinstance(gh.get("code_scanning"), list):
+            kept = sorted(gh["code_scanning"], key=lambda a: json.dumps(a, sort_keys=True))[:cap]
+            out[date]["github-raw.json"] = {**gh, "code_scanning": kept}
+    return out
+
+
 def find_leaks(masked: dict, aliases: dict, extra_terms: tuple[str, ...] = ()) -> list[str]:
     """Search masked output for any real identifier.
 
@@ -368,6 +383,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--alert-repos", type=int, default=None,
                     help="Keep per-alert GitHub detail for only this many repos (the same ones on every date)")
+    ap.add_argument("--code-scanning", type=int, default=None,
+                    help="Keep at most this many code-scanning alerts per date")
     args = ap.parse_args(argv)
 
     sys.path.insert(0, str(Path(__file__).parent))
@@ -384,6 +401,10 @@ def main(argv=None) -> int:
         ap.error("--alert-repos must be at least 1")
     if args.alert_repos is not None:
         snapshot_set = trim_alert_detail(snapshot_set, args.alert_repos)
+    if args.code_scanning is not None:
+        if args.code_scanning < 1:
+            ap.error("--code-scanning must be at least 1")
+        snapshot_set = trim_code_scanning(snapshot_set, args.code_scanning)
     try:
         masked, aliases = mask_set(snapshot_set)
     except UnclassifiedField as e:
