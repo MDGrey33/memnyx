@@ -7,8 +7,11 @@ PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests   # from the ski
 python3 tests/run_mutants.py .                                     # every mutant must be KILLED
 ```
 
-To run the suite before every commit: `cp tests/pre-commit .git/hooks/ && chmod +x .git/hooks/pre-commit`.
-The hook blocks a commit when any test fails. Mutants stay manual (about a minute).
+To run the suite before every commit, from the skill directory:
+`cp tests/pre-commit "$(git rev-parse --git-path hooks)/pre-commit" && chmod +x "$(git rev-parse --git-path hooks)/pre-commit"`.
+The hook works whether the skill is its own repo or sits under `.claude/skills/` in a larger one; in a
+larger repo it runs only for commits that touch the skill. It blocks a commit when any test fails.
+Mutants stay manual (about a minute).
 
 ## Fixtures
 

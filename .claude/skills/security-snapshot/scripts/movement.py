@@ -149,7 +149,9 @@ def held_layers(prev, curr):
     full_p, full_c = _get(prev, ("raw", "layers")), _get(curr, ("raw", "layers"))
     complete = isinstance(full_p, list) and isinstance(full_c, list)
     lp, lc = (full_p, full_c) if complete else (_get(prev, ("raw", "base_layers")), _get(curr, ("raw", "base_layers")))
-    if not isinstance(lp, list) or not isinstance(lc, list):
+    # A failed layer capture writes layers=None and leaves base_layers empty:
+    # that is no data, not zero held layers (levers.base_layers reads it the same way).
+    if not isinstance(lp, list) or not isinstance(lc, list) or (not complete and not (lp and lc)):
         return None
     cur = {x.get("layer"): x for x in lc}
     held = []

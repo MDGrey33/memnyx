@@ -5,7 +5,7 @@ cannot fail for the reason it exists. Run after changing the masker or the
 fixture check:  python3 tests/run_mutants.py .
 Exit code = number of survivors. Anchors must match exactly once.
 """
-import subprocess, sys, os, shutil
+import subprocess, sys, os
 from pathlib import Path
 skill = Path(sys.argv[1])
 M = [  # (name, file, old, new, test that must fail)
@@ -74,6 +74,8 @@ M = [  # (name, file, old, new, test that must fail)
  ('previous map wins over current', 'scripts/movement.py', 'return None if mp is None and mc is None else {**(mp or {}), **{k: v for k, v in (mc or {}).items() if v}}', 'return None if mp is None and mc is None else {**{k: v for k, v in (mc or {}).items() if v}, **(mp or {})}', 'test_movement.TestMovers.test_manager_maps_merge_and_current_wins'),
  ('Dependabot tag never set', 'scripts/movement.py', '                         "github": k in zone_a})', '                         "github": False})', 'test_movement.TestMovers.test_package_groups_by_fixing_action'),
  ('missing maps not reported', 'scripts/movement.py', '        out["managers_captured"] = managers is not None', '        out["managers_captured"] = True', 'test_movement.TestMovers.test_no_maps_means_unknown_and_says_so'),
+ ('failed layer capture read as zero held', 'scripts/movement.py', ' or (not complete and not (lp and lc)):', ':', 'test_movement.TestInspector.test_held_layers_failed_capture_is_no_data'),
+ ('failed previous capture read as zero held', 'scripts/movement.py', ' or (not complete and not (lp and lc)):', ' or (not complete and not lc):', 'test_movement.TestInspector.test_held_layers_failed_capture_is_no_data'),
  ('full layer list ignored', 'scripts/movement.py', '    lp, lc = (full_p, full_c) if complete else', '    lp, lc = (None, None) if False else', 'test_movement.TestInspector.test_held_layers_prefer_the_full_list'),
  ('complete flag when one side lacks the list', 'scripts/movement.py', '    complete = isinstance(full_p, list) and isinstance(full_c, list)', '    complete = isinstance(full_p, list) or isinstance(full_c, list)', 'test_movement.TestInspector.test_held_layers_prefer_the_full_list'),
  ('cached managers re-queried', 'scripts/posture_snapshot.py', '        if known.get(name):\n            out[name] = known[name]\n            continue', '        pass', 'test_capture_helpers.TestPackageManagers.test_looks_up_only_unknown_names_and_reads_the_matching_package'),

@@ -127,6 +127,13 @@ class TestInspector(unittest.TestCase):
         self.assertFalse(h["complete"])  # one side lacks the full list: fall back to the top layers
         self.assertEqual([x["layer"] for x in h["layers"]], ["L1"])
 
+    def test_held_layers_failed_capture_is_no_data(self):
+        # A failed layer capture writes layers=None and base_layers=[]: either side.
+        ok = snap(layers={"L1": (100, 5)}, extra_raw={"layers": [{"layer": "L1", "images": 5, "c": 0, "h": 100}]})
+        failed = snap(layers={}, extra_raw={"layers": None})
+        self.assertIsNone(mv.held_layers(ok, failed))
+        self.assertIsNone(mv.held_layers(failed, ok))
+
     def test_held_layers_need_same_digest_and_image_count(self):
         p = snap(layers={"L1": (100, 5), "L2": (100, 5), "L3": (100, 5)})
         c = snap(layers={"L1": (150, 5), "L2": (900, 6), "L4": (100, 5)})

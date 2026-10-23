@@ -15,7 +15,7 @@ from botocore.exceptions import EndpointConnectionError, ReadTimeoutError  # noq
 with mock.patch("config_util.load_config", return_value={"aws_profile": "p", "aws_region": "r"}):
     import posture_snapshot as ps  # noqa: E402
 
-from test_levers import BR, Ec2Stub, SsmStub, FindingsStub, finding  # noqa: E402
+from test_levers import BR, Ec2Stub, SsmStub, FindingsStub  # noqa: E402
 
 DROPPED = EndpointConnectionError(endpoint_url="https://inspector2.example")
 
@@ -42,7 +42,7 @@ class TestTransportErrorsDegrade(unittest.TestCase):
 
     def test_breakdown_worker_timeout_leaves_no_rows(self):
         class Timeout(FindingsStub):
-            def list_findings(self, **kw):
+            def list_findings(self, filterCriteria, maxResults, nextToken=None):
                 raise ReadTimeoutError(endpoint_url="https://inspector2.example")
         r = ps.package_breakdown(Timeout({}), {"linux"}, ["ns/a"])
         self.assertTrue(r["status"].startswith("failed: ReadTimeoutError"))
