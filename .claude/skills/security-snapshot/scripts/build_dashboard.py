@@ -18,7 +18,9 @@ Output: security-dashboard.html — single file, all snapshot data embedded
 import argparse
 import json
 import os
+import re
 import sys
+from html import escape as html_escape
 from collections import defaultdict
 from pathlib import Path
 
@@ -227,7 +229,10 @@ def load_all_snapshots(reports_dir: Path) -> dict:
     result = {}
     for f in sorted(reports_dir.glob("*/snapshot.json"),
                     key=lambda p: p.parent.name):
-        result[f.parent.name] = json.loads(f.read_text())
+        # Only dated folders: the folder name becomes a key the page puts in
+        # HTML attributes and JS strings.
+        if re.fullmatch(r"\d{8}", f.parent.name):
+            result[f.parent.name] = json.loads(f.read_text())
     return result
 
 def build_trend_series(all_snaps: dict) -> list:
@@ -575,6 +580,10 @@ const CHARTS       = {};
 // ── Utilities ─────────────────────────────────────────────────────────────────
 const fmt  = n => n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(0)+'K':String(n);
 const fmtN = n => Number(n).toLocaleString();
+// Repo, package and secret-type names come from scanner data. They reach innerHTML
+// below, so every one passes through esc() first.
+const ESC  = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'};
+const esc  = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ESC[c]);
 const DARK = {backgroundColor:'#1e293b',borderColor:'#334155',borderWidth:1,
               titleColor:'#e2e8f0',bodyColor:'#94a3b8',padding:10,displayColors:false};
 
@@ -852,7 +861,7 @@ function renderAll() {
     ['Dependabot Alerts', fmtN(gh.vuln_total),    'h',  `${fmtN(gh.vuln_critical)} CRIT · ${fmtN(gh.vuln_high)} HIGH`],
     ['Code Scanning',     fmtN(gh.code_total),    'b',  `${fmtN(gh.code_errors)} errors · ${gh.code_total-gh.code_errors} warnings`],
     ['Secret Scanning',   fmtN(gh.secrets_total), 'p0', 'Credential exposures — P0'],
-    ['Zone A Overlap',    corr.zone_a_pkgs,       'g',  `${corr.zone_a_cves} CVEs confirmed in both sources`],
+    ['Zone A Overlap',    fmtN(corr.zone_a_pkgs), 'g',  `${fmtN(corr.zone_a_cves)} CVEs confirmed in both sources`],
   ].map(([l,v,c,s])=>
     `<div class="card"><div class="kpi-label">${l}</div>
      <div class="kpi-val ${c}">${v}</div>
@@ -962,20 +971,20 @@ function renderDetail() {
     Secrets:   '<span class="signal-badge s-sec">Secrets</span>',
   };
   document.getElementById('convergenceTbody').innerHTML = (corr.convergence||[]).map(r=>{
-    const badges = (r.signals||[]).map(s=>SB[s]||s).join('');
+    const badges = (r.signals||[]).map(s=>SB[s]||esc(s)).join('');
     // GAS parser bug: a template literal containing }/${ (close-interp, slash, open-interp)
     // is misread as the start of a regex, mangling the rest of the script and producing
     // "Unexpected token '<'" in the served page. Use string concatenation for any URL or
     // path built from multiple variables. Plain template literals without ${...}/${...}
     // (e.g., outer HTML strings with </td>) are fine.
-    const url    = 'https://github.com/' + ORG + '/' + r.repo + '/security/dependabot';
+    const url    = 'https://github.com/' + encodeURIComponent(ORG) + '/' + encodeURIComponent(r.repo) + '/security/dependabot';
     return `<tr>
-      <td><a class="repo-link" href="${url}" target="_blank">${r.repo}</a></td>
+      <td><a class="repo-link" href="${esc(url)}" target="_blank">${esc(r.repo)}</a></td>
       <td>${badges}</td>
       <td>${fmtN(r.insp_crit+r.insp_high)}</td>
       <td>${fmtN(r.gh_crit+r.gh_high)}</td>
-      <td>${r.code_scanning}</td>
-      <td>${r.secrets>0?`<b style="color:var(--crit)">${r.secrets}</b>`:'0'}</td>
+      <td>${fmtN(r.code_scanning)}</td>
+      <td>${r.secrets>0?`<b style="color:var(--crit)">${fmtN(r.secrets)}</b>`:'0'}</td>
       <td style="color:var(--muted);font-size:11px">${fmtN(r.combined_score)}</td>
     </tr>`;
   }).join('');
@@ -1315,7 +1324,7 @@ function renderExec(insp, gh, corr, rawTotal) {
     document.getElementById('execBanner').innerHTML =
       `<div class="banner-p0" style="margin-bottom:24px"><div class="icon">⚠</div><div>
          <div class="title">P0 — ${gh.secrets_total} credentials exposed in source code</div>
-         <div class="sub">${aws?aws.count+' AWS key pairs':''}${db?' · '+db.count+' production database URIs':''} — rotate before any other remediation work.</div>
+         <div class="sub">${aws?fmtN(aws.count)+' AWS key pairs':''}${db?' · '+fmtN(db.count)+' production database URIs':''} — rotate before any other remediation work.</div>
        </div></div>`;
   } else {
     document.getElementById('execBanner').innerHTML = '';
@@ -1387,9 +1396,9 @@ function renderExec(insp, gh, corr, rawTotal) {
     <div class="exec-item">
       <div class="exec-num ${nc}">${i+1}</div>
       <div>
-        <div class="exec-title">${it.title}</div>
-        <div class="exec-body">${it.body}</div>
-        <span class="exec-tag ${it.tag}">${it.tagLabel}</span>
+        <div class="exec-title">${esc(it.title)}</div>
+        <div class="exec-body">${esc(it.body)}</div>
+        <span class="exec-tag ${it.tag}">${esc(it.tagLabel)}</span>
       </div>
     </div>`).join('');
 
@@ -1419,22 +1428,37 @@ def build(corr_path: Path, reports_dir: Path) -> str:
 
     trend_series = build_trend_series(all_snaps)
 
-    html = HTML
-    html = html.replace("__SNAPSHOTS__",    json.dumps(all_snaps, default=str))
-    html = html.replace("__DATES__",        json.dumps(dates))
-    html = html.replace("__CURRENT_DATE__", json.dumps(slug))
-    html = html.replace("__TREND_SERIES__", json.dumps(trend_series))
-    html = html.replace("__ANNOTATIONS__",  json.dumps(ANNOTATIONS))
-    html = html.replace("'__ORG__'",        json.dumps(ORG))
-    html = html.replace("__TITLE__",        TITLE)
     # Account/region come from the snapshot data (posture_snapshot.py derives the
     # account via STS at collection time). Legacy snapshots pre-dating that field
     # fall back to the org name alone.
     acct   = data.get("account", "")
     region = data.get("region",  "")
     header = " · ".join(x for x in (acct, region, ORG) if x) or ORG
-    html = html.replace("__ORG_ACCOUNT__",  header)
-    return html
+    subs = {
+        "__SNAPSHOTS__":    js_literal(all_snaps),
+        "__DATES__":        js_literal(dates),
+        "__CURRENT_DATE__": js_literal(slug),
+        "__TREND_SERIES__": js_literal(trend_series),
+        "__ANNOTATIONS__":  js_literal(ANNOTATIONS),
+        "'__ORG__'":        js_literal(ORG),
+        "__TITLE__":        html_escape(TITLE),
+        "__ORG_ACCOUNT__":  html_escape(header),
+    }
+    return fill_placeholders(HTML, subs)
+
+
+def js_literal(obj):
+    """JSON for a <script> block. Escaping <, > and & as \\u sequences keeps a data
+    string such as `</script>` from ending the block; JSON reads them back unchanged."""
+    return (json.dumps(obj, default=str)
+            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+
+
+def fill_placeholders(template, subs):
+    """Substitute every placeholder in one pass, so text inserted from the data is
+    never scanned for placeholders itself."""
+    pattern = re.compile("|".join(re.escape(k) for k in sorted(subs, key=len, reverse=True)))
+    return pattern.sub(lambda m: subs[m.group(0)], template)
 
 
 def main():

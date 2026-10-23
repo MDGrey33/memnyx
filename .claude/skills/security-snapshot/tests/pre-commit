@@ -1,0 +1,10 @@
+#!/bin/sh
+# Run the skill's test suite before every commit; block the commit on failure.
+# Mutants (tests/run_mutants.py) stay manual — they take about a minute.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if ! PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests >/tmp/security-snapshot-precommit.log 2>&1; then
+  echo "pre-commit: test suite failed — commit blocked. Output:" >&2
+  tail -30 /tmp/security-snapshot-precommit.log >&2
+  exit 1
+fi
+echo "pre-commit: $(grep -E '^Ran [0-9]+ tests' /tmp/security-snapshot-precommit.log)"
