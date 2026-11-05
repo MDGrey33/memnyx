@@ -23,7 +23,7 @@ import math
 import re
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import emit_movement as em  # noqa: E402
@@ -56,8 +56,13 @@ def link_policy(org, region=""):
             return False
         host, path = (u.hostname or "").lower(), u.path.lower()
         if host == "github.com":
+            # The browser resolves . and .. (%2e too) before it opens a link, so a
+            # path that climbs out of the org could reach any github.com page.
+            segments = unquote(path).split("/")
+            if "\\" in unquote(path) or any(s in (".", "..") for s in segments):
+                return False
             return bool(org_l) and (path.startswith((f"/{org_l}/", f"/orgs/{org_l}/")) or path in (f"/{org_l}", f"/orgs/{org_l}")
-                                    or path.startswith("/advisories") or path == "/pulls")
+                                    or path == "/advisories" or path.startswith("/advisories/") or path == "/pulls")
         return host == "console.aws.amazon.com" or (host.endswith(".console.aws.amazon.com") and host.count(".") == 4)
     return allowed
 
@@ -455,19 +460,16 @@ def _verdict(mv):
 
 
 def _waterfall(mv):
-    """ECR critical + high from the basis to now, stepped by the action that fixes it.
-    "Other" is the remainder after the groups, never a figure of its own."""
-    insp, groups = mv.get("inspector"), (mv.get("movers") or {}).get("package_groups")
-    if not isinstance(insp, dict) or not groups:
+    """Critical + high by package from the basis to now, stepped by the action that
+    fixes it. Start, end and steps are all package counts, so the steps add up."""
+    movers = mv.get("movers") or {}
+    groups, totals = movers.get("package_groups"), movers.get("package_totals")
+    if not groups or not isinstance(totals, dict):
         return None
-    start, end = insp["prev"]["ecr_ch"], insp["curr"]["ecr_ch"]
     label = {"unknown": "Package manager unknown"}
     steps = [{"label": label.get(g["group"], g["group"][:1].upper() + g["group"][1:]), "delta": g["delta"]}
              for g in groups if g.get("delta")]
-    other = (end - start) - sum(s["delta"] for s in steps)
-    if other:
-        steps.append({"label": "Other", "delta": other})
-    return {"start": start, "end": end, "steps": steps}
+    return {"start": totals["prev"], "end": totals["curr"], "steps": steps}
 
 
 def _platform(p):

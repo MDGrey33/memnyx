@@ -10,7 +10,7 @@ const view = (o = {}) => ({
              critical: { prev: 15514, curr: 3878 }, factors: { images: [381, 216], per_image: [255.8, 111.4],
                                                                  images_ratio: 0.5, per_image_ratio: 0.436, ecr: [97474, 24054] } },
   warnings: [{ kind: 'inventory', title: '34% fewer images scanned (382 → 254)', body: 'Part of the fall is fewer images kept.' }],
-  waterfall: { start: 97474, end: 24054, steps: [{ label: 'Kernel headers', delta: -47668 }, { label: 'Other', delta: -25752 }] },
+  waterfall: { start: 97474, end: 24054, steps: [{ label: 'Kernel headers', delta: -47668 }, { label: 'OS packages', delta: -25752 }] },
   note: { lead: 'LEAD-TEXT', blocks: [
     { type: 'stat', value: '−54k', label: 'slim images', sub: '12 Oct', tone: 'fix' },
     { type: 'stat', value: '≈15k', label: 'retention', sub: null, tone: 'inventory' },
@@ -73,8 +73,10 @@ test('opens on the previous-snapshot comparison: verdict, factors, warnings, not
   assert.match(h, /mv-v mv-good">255\.8 → 111\.4/);  // fewer findings per image is the remediation
   assert.match(h, /34% fewer images scanned/);
   assert.match(h, /LEAD-TEXT[\s\S]*mvWaterfall[\s\S]*CARD-BODY/);  // the verdict sentence sits above the chart
-  assert.match(h, /Critical \+ high in ECR images, by what fixes them<\/h4>[\s\S]*97,474 → 24,054\. EC2 and Lambda findings are not included\./);
-  assert.match(h, /ECR images hold 97,474 → 24,054 of the total: images with findings × findings\s+per image\. The rest is EC2 and Lambda\./);
+  assert.match(h, /Critical \+ high by package, by what fixes them<\/h4>[\s\S]*97,474 → 24,054, all resource types\. A finding that names two packages counts in both/);
+  assert.match(h, /Critical \+ high per image<\/div>/);
+  assert.match(h, /ECR images hold 97,474 → 24,054 of the total: images with findings × critical \+ high\s+per image\. The rest is EC2 and Lambda\./);
+  assert.match(h, /Ranked by today's critical \+ high naming the packages each change fixes\. Some overlap: a finding can name more than one package/);
   assert.doesNotMatch(h, /is the remediation|without fixing anything/);
   for (const s of ['Why it moved', 'What to fix next', 'Biggest moves by repo']) assert.match(h, new RegExp(`<h2>${s}</h2>`));
   assert.doesNotMatch(h, /<h2>(Where it moved|Checks|GitHub)<\/h2>/);
@@ -227,7 +229,7 @@ test('charts: trend from TREND_START, waterfall steps, repo movers coloured by d
   assert.deepEqual(charts.map(c => c.id), ['mvTrend', 'mvWaterfall', 'mvNote3', 'mvNote5', 'mvRepos']);
   assert.deepEqual(charts[0].config.data.labels, ['20260909', '20260923', '20261007', '20261021']);
   const wf = charts[1].config.data;
-  assert.deepEqual(wf.labels, ['7 Oct', 'Kernel headers', 'Other', '21 Oct']);
+  assert.deepEqual(wf.labels, ['7 Oct', 'Kernel headers', 'OS packages', '21 Oct']);
   assert.deepEqual(wf.datasets[0].data, [[0, 97474], [49806, 97474], [24054, 49806], [0, 24054]]);
   assert.deepEqual(charts[4].config.data.datasets[0].backgroundColor, ['#22c55e', '#ef4444']);
   assert.match(run("movedTrendCaption('20261021')"), /9 Sept <b>240<\/b>[\s\S]*peak 21 Oct <b>600<\/b>[\s\S]*now <b>600<\/b>/);

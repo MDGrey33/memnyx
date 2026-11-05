@@ -70,9 +70,9 @@ function mvVerdict(v) {
   const factors = f ? `
     <div class="mv-factor"><div class="mv-k">Images with findings</div>
       <div class="mv-v">${mvN(f.images[0])} → ${mvN(f.images[1])}<small>${mvRatio(f.images_ratio)}</small></div></div>
-    <div class="mv-factor"><div class="mv-k">Findings per image</div>
+    <div class="mv-factor"><div class="mv-k">Critical + high per image</div>
       <div class="mv-v ${mvTone(f.per_image[0], f.per_image[1])}">${mvN(f.per_image[0])} → ${mvN(f.per_image[1])}<small>${mvRatio(f.per_image_ratio)}</small></div></div>
-    <div class="mv-hint">ECR images hold ${mvN(f.ecr[0])} → ${mvN(f.ecr[1])} of the total: images with findings × findings
+    <div class="mv-hint">ECR images hold ${mvN(f.ecr[0])} → ${mvN(f.ecr[1])} of the total: images with findings × critical + high
       per image. The rest is EC2 and Lambda. Each factor moves for several reasons: fixes, retention, scanning coverage.</div>` : '';
   return `<div class="card mv-hero ${tone}">
     <div><div class="mv-eyebrow">${esc(v.label)}</div><div class="mv-big ${tone}">${big}</div>
@@ -141,7 +141,7 @@ function mvItem(it) {
 function mvLevers(levers) {
   if (!levers) return '';
   return `<div class="mv-sec"><h2>What to fix next</h2>
-    <p class="mv-sec-lede">Ranked by how many of today's critical + high each change removes. Some overlap: a package can sit in a listed base layer.</p>
+    <p class="mv-sec-lede">Ranked by today's critical + high naming the packages each change fixes. Some overlap: a finding can name more than one package, and a package can sit in a listed base layer.</p>
     <div class="mv-levers">${levers.map((l, i) => {
       const items = l.items.map(mvItem);
       const width = Math.max(0, Math.min(100, Number(l.share) || 0));
@@ -192,8 +192,8 @@ function movedPanelHtml(date, basis) {
     `<div class="mv-sec"><h2>Why it moved</h2>
       <p class="mv-sec-lede">The chart is built from the data and looks the same every time. What follows it is written for this snapshot.</p>
       ${v.note && v.note.lead ? `<div class="mv-lead">${v.note.lead}</div>` : ''}
-      ${v.waterfall ? `<div class="card mv-gap-top"><h4 class="mv-chart-title">Critical + high in ECR images, by what fixes them</h4>
-        <div class="mv-sub">${mvN(v.waterfall.start)} → ${mvN(v.waterfall.end)}. EC2 and Lambda findings are not included.</div>
+      ${v.waterfall ? `<div class="card mv-gap-top"><h4 class="mv-chart-title">Critical + high by package, by what fixes them</h4>
+        <div class="mv-sub">${mvN(v.waterfall.start)} → ${mvN(v.waterfall.end)}, all resource types. A finding that names two packages counts in both, so this runs above the finding count.</div>
         <div style="height:240px"><canvas id="mvWaterfall"></canvas></div></div>` : ''}
       ${mvNote(v.note)}</div>` +
     mvLevers(v.levers) + mvRepoMovers(v.repos);

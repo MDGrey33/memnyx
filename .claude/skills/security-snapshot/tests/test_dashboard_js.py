@@ -152,7 +152,8 @@ def mv_fixture(**over):
                       "curr": {"ecr_ch": 600, "images": 8, "per_image": 75.0, "non_ecr_ch": 5},
                       "images_ratio": 0.8, "per_image_ratio": 0.75, "ecr_ch_ratio": 0.6},
         "movers": {"repos": [{"repo": "ns-1/a", "delta": -300}, {"repo": "ns-1/b", "delta": 20}],
-                   "package_groups": [{"group": "kernel headers", "delta": -350}, {"group": "unknown", "delta": -30}]},
+                   "package_groups": [{"group": "kernel headers", "delta": -350}, {"group": "unknown", "delta": -30}],
+                   "package_totals": {"prev": 1100, "curr": 720}},
         "data_quality": [], "captures": {}, "held_layers": None,
         "levers": {"levers": [
             {"key": "kernel_headers", "title": "Remove kernel headers", "owner": "service team", "action": "Slim.",
@@ -184,18 +185,17 @@ class TestVerdictAndWaterfall(unittest.TestCase):
     def test_no_verdict_when_the_headline_is_missing_from_one_side(self):
         self.assertIsNone(mp.page_view(mv_fixture(counts=counts(inspector_ch=("x", True, None, 5))), "headline")["verdict"])
 
-    def test_waterfall_steps_add_up_and_other_is_the_remainder(self):
+    def test_the_waterfall_is_in_package_counts_and_its_steps_add_up(self):
         w = mp.page_view(mv_fixture(), "headline")["waterfall"]
-        self.assertEqual((w["start"], w["end"]), (1000, 600))
+        self.assertEqual((w["start"], w["end"]), (1100, 720))  # package totals, not the ECR finding count (1000 → 600)
         self.assertEqual(w["steps"], [{"label": "Kernel headers", "delta": -350},
-                                      {"label": "Package manager unknown", "delta": -30},
-                                      {"label": "Other", "delta": -20}])
+                                      {"label": "Package manager unknown", "delta": -30}])
         self.assertEqual(w["start"] + sum(s["delta"] for s in w["steps"]), w["end"])
 
-    def test_no_other_step_when_the_groups_account_for_everything(self):
+    def test_no_waterfall_without_package_totals(self):
         mv = mv_fixture()
-        mv["movers"]["package_groups"] = [{"group": "kernel headers", "delta": -400}]
-        self.assertEqual([s["label"] for s in mp.page_view(mv, "headline")["waterfall"]["steps"]], ["Kernel headers"])
+        del mv["movers"]["package_totals"]
+        self.assertIsNone(mp.page_view(mv, "headline")["waterfall"])
 
     def test_no_waterfall_without_groups(self):
         mv = mv_fixture()
@@ -534,6 +534,14 @@ class TestLinks(unittest.TestCase):
             self.assertFalse(self.allow(url), url)
         self.assertFalse(mp.link_policy("")("https://github.com/x/y"))
         self.assertFalse(self.allow("https://github.com:0/acme-org/x"))  # any explicit port is refused
+
+    def test_a_path_that_climbs_out_of_the_org_is_refused(self):
+        # The browser resolves . and .. (and %2e%2e) before opening the link.
+        for url in ("https://github.com/acme-org/../attacker/repo", "https://github.com/acme-org/%2e%2e/attacker/repo",
+                    "https://github.com/acme-org/svc/%2E%2E/%2E%2E/x", "https://github.com/acme-org/./x",
+                    "https://github.com/orgs/acme-org/../../x", "https://github.com/advisories/../attacker",
+                    "https://github.com/acme-org/svc/%5c..%5cx", "https://github.com/advisoriesx/y"):
+            self.assertFalse(self.allow(url), url)
 
     def test_a_malformed_port_is_refused_not_raised(self):
         # urlsplit parses it; only reading .port raises, which once failed the whole comparison.

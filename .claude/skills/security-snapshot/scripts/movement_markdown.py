@@ -132,7 +132,8 @@ def _movers(mv):
     m = mv["movers"]
     lines = ["## Movers", ""]
     if m["package_groups"]:
-        lines.append("Packages are grouped by the action that fixes them.\n")
+        lines.append("Packages are grouped by the action that fixes them. Counts are per package, across every "
+                     "resource type: a finding that names two packages counts in both.\n")
         if not m.get("managers_captured"):
             lines.append("_No package-manager map in either snapshot: everything outside the kernel headers shows as "
                          "unknown. Snapshots from this version on carry the map._\n")

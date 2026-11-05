@@ -160,6 +160,7 @@ class TestMovers(unittest.TestCase):
         self.assertEqual([g["group"] for g in m["package_groups"]], list(mv.GROUPS))  # report order
         self.assertEqual(sum(g["delta"] for g in m["package_groups"]), sum(x["delta"] for x in m["packages"]))
         self.assertTrue(all(g["fix"] for g in m["package_groups"]))
+        self.assertEqual(m["package_totals"], {"prev": 166, "curr": 285})
         axios = next(x for x in m["packages"] if x["package"] == "axios")
         self.assertTrue(axios["github"])
         self.assertFalse(next(x for x in m["packages"] if x["package"] == "perl")["github"])
@@ -221,6 +222,11 @@ class TestFixturePair(unittest.TestCase):
         self.assertEqual((s["repos"], s["curr_ch"] - s["prev_ch"]), (36, 11208))
         groups = {g["group"]: g["delta"] for g in self.mv["movers"]["package_groups"]}
         self.assertEqual(groups["kernel headers"], 11718)
+        # The waterfall's scale: package counts, which add up, and run above the ECR finding count.
+        t = self.mv["movers"]["package_totals"]
+        self.assertEqual((t["prev"], t["curr"]), (82302, 102800))
+        self.assertEqual(t["curr"] - t["prev"], sum(groups.values()))
+        self.assertEqual((d["prev"]["ecr_ch"], d["curr"]["ecr_ch"]), (77195, 97474))
 
     def test_renders_without_captures(self):
         out = md.render_movement_markdown(self.mv)

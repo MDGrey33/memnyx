@@ -285,6 +285,9 @@ def movers(prev, curr, limit=DEFAULT_MOVER_LIMIT):
                                   "share_pct": round(100 * abs(groups[g]) / gross, 1) if gross else None}
                                  for g in GROUPS if g in groups]
         out["managers_captured"] = managers is not None
+        # The groups' own scale: Inspector counts a finding once per package it names,
+        # across every resource type, so these run above the ECR finding count.
+        out["package_totals"] = {"prev": sum(pp.values()), "curr": sum(pc.values())}
     return out
 
 
