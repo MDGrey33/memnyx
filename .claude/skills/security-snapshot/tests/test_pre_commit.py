@@ -5,14 +5,21 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+import unittest.mock as mock
 
 HOOK = Path(__file__).resolve().parent / "pre-commit"
 PASS = "import unittest\nclass T(unittest.TestCase):\n    def test_ok(self): pass\n"
 FAIL = "import unittest\nclass T(unittest.TestCase):\n    def test_bad(self): self.fail('x')\n"
 
 
+def clean_env(**extra):
+    """The environment without GIT_*: under `git commit -a` the hook runs with
+    GIT_INDEX_FILE set to the real commit's index, and a temp repo would write there."""
+    return dict({k: v for k, v in os.environ.items() if not k.startswith("GIT_")}, **extra)
+
+
 def git(repo, *args):
-    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=clean_env())
 
 
 def fake_skill(skill, test_src):
@@ -29,8 +36,18 @@ class TestPreCommitHook(unittest.TestCase):
         git(self.repo, "init", "-q")
 
     def run_hook(self):
-        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
-        return subprocess.run(["sh", str(HOOK)], cwd=self.repo, env=env, capture_output=True, text=True)
+        return subprocess.run(["sh", str(HOOK)], cwd=self.repo, env=clean_env(PYTHONDONTWRITEBYTECODE="1"),
+                              capture_output=True, text=True)
+
+    def test_the_real_commits_index_is_never_touched(self):
+        real_index = self.repo.parent / f"{self.repo.name}-real-index"
+        self.addCleanup(lambda: real_index.unlink(missing_ok=True))
+        with mock.patch.dict(os.environ, {"GIT_INDEX_FILE": str(real_index)}):
+            fake_skill(self.repo, FAIL)
+            git(self.repo, "add", "-A")
+            r = self.run_hook()
+        self.assertFalse(real_index.exists())
+        self.assertNotEqual(r.returncode, 0)  # the hook read the temp repo's index, saw the skill staged, and ran its suite
 
     def test_skill_as_its_own_repo(self):
         fake_skill(self.repo, PASS)

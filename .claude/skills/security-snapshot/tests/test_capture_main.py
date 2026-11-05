@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
+import unittest.mock as mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 with mock.patch("config_util.load_config", return_value={"aws_profile": "p", "aws_region": "r"}):
@@ -89,7 +89,7 @@ class TestCaptureMain(unittest.TestCase):
         self.assertTrue(kernel, "fixture holds no kernel package, so this test cannot fail")
         with tempfile.TemporaryDirectory() as d:
             breakdown, _ = self.run_main(d)
-            self.assertTrue(kernel <= set(breakdown.call_args.args[1]))
+            self.assertLessEqual(kernel, set(breakdown.call_args.args[1]))
 
 
 if __name__ == "__main__":

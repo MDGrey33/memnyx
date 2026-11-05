@@ -3,7 +3,7 @@ share arithmetic, lever totals, the held-layer gap, rises from zero, escaping.""
 import sys
 import unittest
 from pathlib import Path
-from unittest import mock
+import unittest.mock as mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))

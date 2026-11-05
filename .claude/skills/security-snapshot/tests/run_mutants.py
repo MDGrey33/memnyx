@@ -347,6 +347,7 @@ M = [  # (name, file, old, new, test that must fail)
  ('negative zero kept', 'scripts/movement_page.py', '    return v + 0  # -0.0', '    return v  # -0.0', 'test_dashboard_js.TestNote.test_negative_zero_is_zero'),
  ('a shorter fence closes a longer one', 'scripts/movement_page.py', 'and len(s) >= len(marker):', 'and len(s) >= 3:', 'test_dashboard_js.TestNote.test_a_longer_fence_line_inside_a_block_is_its_content'),
  ('a longer fence opens a block', 'scripts/movement_page.py', 'FENCE_RE = re.compile(r"^(`{3,}|~{3,})(.*)$")', 'FENCE_RE = re.compile(r"^(```|~~~)(.*)$")', 'test_dashboard_js.TestNote.test_a_longer_fence_line_inside_a_block_is_its_content'),
+ ('temp repos write to the real index', 'tests/test_pre_commit.py', '    return dict({k: v for k, v in os.environ.items() if not k.startswith("GIT_")}, **extra)', '    return dict(os.environ, **extra)', 'test_pre_commit.TestPreCommitHook.test_the_real_commits_index_is_never_touched'),
  ('name check ignores function scopes', 'tests/test_static_names.py', '        for c in t.get_children():\n            walk(c)', '        pass', 'test_static_names.TestNoUndefinedNames.test_the_check_finds_an_undefined_name'),
 ]
 

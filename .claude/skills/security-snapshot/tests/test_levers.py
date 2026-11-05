@@ -2,7 +2,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest import mock
+import unittest.mock as mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 import levers as lv  # noqa: E402

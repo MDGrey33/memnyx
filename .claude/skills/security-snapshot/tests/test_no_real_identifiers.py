@@ -12,7 +12,7 @@ import re
 import sys
 import tempfile
 import unittest
-from unittest import mock
+import unittest.mock as mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -118,7 +118,7 @@ class TestNoRealIdentifiers(unittest.TestCase):
 
     def test_the_walk_reads_every_shipped_file_and_no_fixture(self):
         rels = {str(rel) for rel, _ in shipped_files()}
-        self.assertTrue({"SKILL.md", "tests/pre-commit", "scripts/dashboard/moved.js", "scripts/movement_page.py"} <= rels)
+        self.assertLessEqual({"SKILL.md", "tests/pre-commit", "scripts/dashboard/moved.js", "scripts/movement_page.py"}, rels)
         self.assertFalse({r for r in rels if r.startswith("tests/fixtures/") or r.endswith("config.local.json")})
 
     def test_no_shipped_file_names_a_configured_value(self):
