@@ -23,14 +23,16 @@ function pickMoved(date, basis) {
 // ── Links ───────────────────────────────────────────────────────────────────
 // An ECR repo maps to the GitHub repo with the same last path segment, the join
 // correlation.py uses.
-const mvRepoUrl  = r => `https://github.com/${encodeURIComponent(ORG)}/${encodeURIComponent(String(r).split('/').pop())}`;
+// URLs are concatenated, not template literals: Apps Script's parser reads // inside one as a
+// comment and ${...}/ as a regex, and the page it serves stops running (see app.js).
+const mvRepoUrl  = r => 'https://github.com/' + encodeURIComponent(ORG) + '/' + encodeURIComponent(String(r).split('/').pop());
 const mvPrsUrl   = p => 'https://github.com/pulls?q=' + encodeURIComponent(`is:open is:pr org:${ORG} author:app/dependabot ${p}`);
-const mvAlertUrl = p => `https://github.com/orgs/${encodeURIComponent(ORG)}/security/alerts/dependabot?q=` +
+const mvAlertUrl = p => 'https://github.com/orgs/' + encodeURIComponent(ORG) + '/security/alerts/dependabot?q=' +
                         encodeURIComponent(`is:open package:${p}`);
 // Copied from the console, not a documented link format. It carries no filter, so
 // if AWS changes the route the worst case is the console's start page.
 const mvInspectorUrl = () => REGION
-  ? `https://${encodeURIComponent(REGION)}.console.aws.amazon.com/inspector/v2/home?region=${encodeURIComponent(REGION)}#/findings?by=repository`
+  ? 'https://' + encodeURIComponent(REGION) + '.console.aws.amazon.com/inspector/v2/home?region=' + encodeURIComponent(REGION) + '#/findings?by=repository'
   : 'https://console.aws.amazon.com/inspector/v2/home';
 
 const MV_EXT = '<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M9 2h5v5M14 2L7 9M12 9v4.5a.5.5 0 0 1-.5.5h-9a.5.5 0 0 1-.5-.5v-9a.5.5 0 0 1 .5-.5H7"/></svg>';

@@ -686,7 +686,62 @@ class TestTrendSeries(unittest.TestCase):
         self.assertEqual((pt["insp_crit"], pt["insp_high"], pt["insp_ch"]), (7, 30, 37))
 
 
+def template_hazards(js):
+    """Places inside a template literal (outside ${...}) where Apps Script's parser goes wrong."""
+    out, i, stack, n = [], 0, [], len(js)  # stack: "`" in a template, "{" in code or ${...}
+    while i < n:
+        c, top = js[i], (stack[-1] if stack else None)
+        if top == "`":
+            if c == "\\":
+                i += 2
+                continue
+            if c == "`":
+                stack.pop()
+            elif js.startswith("${", i):
+                stack.append("{")
+                i += 1
+            elif js.startswith("//", i):
+                out.append(js[max(0, i - 20):i + 20])
+            i += 1
+            continue
+        if js.startswith("//", i) or js.startswith("/*", i):
+            end = js.find("\n" if js[i + 1] == "/" else "*/", i + 2)
+            i = n if end < 0 else end + (1 if js[i + 1] == "/" else 2)
+            continue
+        if c in "'\"":
+            j = i + 1
+            while j < n and js[j] != c and js[j] != "\n":
+                j += 2 if js[j] == "\\" else 1
+            i = j + 1
+            continue
+        if c == "`":
+            stack.append("`")
+        elif c == "{":
+            stack.append("{")
+        elif c == "}" and stack:
+            stack.pop()
+            if stack and stack[-1] == "`" and js.startswith("/", i + 1):
+                out.append(js[max(0, i - 20):i + 20])
+        i += 1
+    return out
+
+
 class TestPageJs(unittest.TestCase):
+    def test_no_template_literal_apps_script_misreads(self):
+        # Apps Script's server parser reads // inside a template literal as a comment, and a /
+        # straight after ${...} as a regex; the page it serves then stops running. Locally the
+        # page works, so only this catches it.
+        self.assertEqual(template_hazards(bd.page_js()), [])
+
+    def test_the_hazard_scanner_tells_a_template_from_the_code_around_it(self):
+        self.assertEqual(len(template_hazards("const u = `https://${h}`;")), 1)
+        self.assertEqual(len(template_hazards("const u = `${a}/${b}`;")), 1)
+        self.assertEqual(len(template_hazards("const u = `${a}/x`;")), 1)
+        self.assertEqual(template_hazards("const t = `${a} b`;  // a comment after it"), [])
+        self.assertEqual(template_hazards("// a comment that quotes `https://x`\n/* and `https://y` */ const a = 1;"), [])
+        self.assertEqual(template_hazards("const u = 'https://x/' + a + '/y';  // `quoted`"), [])
+        self.assertEqual(template_hazards("const h = `<p>${a}</p>`; const r = /x\\//g;"), [])
+
     def test_files_inline_in_build_order(self):
         js = bd.page_js()
         order = [js.index(s) for s in ("function slugToDate", "function renderAll", "function movedPanelHtml",
