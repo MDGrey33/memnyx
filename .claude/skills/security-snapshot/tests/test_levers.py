@@ -109,6 +109,19 @@ class TestDependabotLever(unittest.TestCase):
         self.assertEqual([(x["package"], x["ch"]) for x in d["rows"]], [("axios", 200)])
         self.assertEqual(d["removes_ch"], 200)
 
+    def test_rows_carry_the_github_side_of_the_overlap(self):
+        s = snap(packages={"axios": 200, "tar": 50}, zone_a=["axios", "tar"])
+        s["correlation"]["correlation"]["zone_a_pkg_overlap"] = [
+            {"package": "axios", "gh_crit": 1, "gh_high": 215, "gh_repos": 22}, {"package": "tar"}]
+        d = by_key(levers_of(s, {"axios": "NODE", "tar": "NODE"}), "dependabot_dependencies")
+        rows = {r["package"]: r for r in d["rows"]}
+        self.assertEqual((rows["axios"]["gh_ch"], rows["axios"]["gh_repos"]), (216, 22))
+        self.assertEqual((rows["tar"]["gh_ch"], rows["tar"]["gh_repos"]), (None, None))  # not captured is not zero
+        s["raw"]["package_managers"] = [{"package": "axios", "manager": "NODE"}, {"package": "tar", "manager": "NODE"}]
+        md = render_movement_markdown(mv.security_movement(s, s))
+        self.assertIn("| axios | 200 | 216 | 22 | NODE |", md)
+        self.assertIn("| tar | 50 | – | – | NODE |", md)
+
 
 class TestComposition(unittest.TestCase):
     def test_levers_sorted_by_findings_removed_with_share(self):

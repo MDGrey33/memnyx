@@ -59,7 +59,7 @@ def _counts(mv):
 
 def _inspector(mv):
     d = mv["inspector"]
-    lines = ["## Inspector: images × findings per image", ""]
+    lines = ["## Inspector: images × critical + high per image", ""]
     if d is None:
         return "\n".join(lines + ["Not available: repository aggregation missing from a snapshot."])
     p, c = d["prev"], d["curr"]
@@ -144,7 +144,7 @@ def _movers(mv):
         lines.append(_table(["Package", "Group", "Previous", "Current", "Change", "Dependabot"],
                             [[p["package"], p["group"], _n(p["prev_ch"]), _n(p["curr_ch"]), _n(p["delta"], True),
                               "yes" if p.get("github") else ""] for p in m["packages"]]))
-        lines.append("\n_Dependabot = also flagged by GitHub, so a dependency PR path already exists._\n")
+        lines.append("\n_Dependabot = also flagged by GitHub in the source; a Dependabot PR may already be open._\n")
     if m["repos"]:
         lines.append(_table(["Repository", "Previous (images)", "Current (images)", "Change"],
                             [[r["repo"], f"{_n(r['prev_ch'])} ({_n(r['prev_images'])})",
@@ -191,7 +191,7 @@ def _levers(mv):
         return "\n".join(lines + [f"Not available: {why}"] + _hosts(lv))
     lines.append(f"Current stock, not movement: what each change removes from today's critical + high "
                  f"({_n(lv['total_ch'])}). Levers can overlap where a package sits in a listed layer; the "
-                 f"base-layer figures already exclude the first two.\n")
+                 f"base-layer figures already exclude the kernel-header and bundled-runtime findings.\n")
     if lv.get("breakdown_status") not in (None, "ok"):
         lines.append(f"_Per-repo breakdown {lv['breakdown_status']}: kernel-header and bundled-runtime levers omitted, "
                      f"and base-layer counts include their findings._\n")
@@ -220,8 +220,9 @@ def _levers(mv):
                                   ", ".join(r["repo_list"][:4]) + (f" (+{r['repos'] - 4})" if r["repos"] > 4 else "")]
                                  for r in l["rows"]]))
         elif l["key"] == "dependabot_dependencies":
-            lines.append(_table(["Package", "Critical + high", "Ecosystem"],
-                                [[r["package"], _n(r["ch"]), r["manager"]] for r in l["rows"]]))
+            lines.append(_table(["Package", "Critical + high", "GitHub critical + high", "GitHub repos", "Ecosystem"],
+                                [[r["package"], _n(r["ch"]), _n(r.get("gh_ch")), _n(r.get("gh_repos")), r["manager"]]
+                                 for r in l["rows"]]))
     return "\n".join(lines + _hosts(lv))
 
 

@@ -99,15 +99,15 @@ class TestDashboardEmbedding(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which("node"), "node not installed")
     def test_page_escapes_names_before_innerhtml(self):
-        js = bd.HTML.split("<script>")[-1]
+        js = bd.page_js()
         esc_src = "\n".join(l for l in js.splitlines() if l.startswith(("const ESC", "const esc")))
         probe = esc_src + "\nprocess.stdout.write(esc('<img src=x onerror=\"alert(1)\">&\\''))"
         out = subprocess.run(["node", "-e", probe], capture_output=True, text=True, check=True).stdout
         self.assertEqual(out, "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&amp;&#39;")
-        for sink in ("${esc(r.repo)}", "${esc(it.title)}", "${esc(it.body)}", "${esc(it.tagLabel)}"):
+        for sink in ("${esc(r.repo)}", "${esc(l.title)}", "${esc(it.name)}", "${esc(b.value)}"):
             self.assertIn(sink, js)
         self.assertNotIn("${r.repo}", js)
-        self.assertNotIn("${it.title}", js)
+        self.assertNotIn("${l.title}", js)
 
 
 class Partial:

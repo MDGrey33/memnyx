@@ -15,12 +15,10 @@ The gh CLI must be authenticated as an account with access to that org.
 """
 import argparse
 import json
-import os
 import subprocess
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
 
 
 from config_util import (
@@ -332,9 +330,13 @@ def aggregate_vuln(alerts: list[dict]) -> dict:
         "no_fix_critical_high": [
             {"repo": a["repo"], "package": a["package"], "severity": a["severity"],
              "cve": a["cve"], "summary": a["summary"]}
-            for a in sorted(no_fix, key=lambda x: SEV_ORDER.get(x["severity"], 9))[:30]
+            for a in sorted(no_fix, key=lambda x: SEV_ORDER.get(x["severity"], 9))[:NO_FIX_ROWS]
         ],
+        "no_fix_critical_high_total": len(no_fix),
     }
+
+
+NO_FIX_ROWS = 30
 
 
 # ── Report builder ────────────────────────────────────────────────────────────
@@ -382,7 +384,8 @@ def build_report(raw: dict) -> str:
         md_table(
             ["Source", "Status", "Total alerts"],
             [
-                ("Vulnerability alerts (Dependabot)", "✓ active", f"{va.get('total', 0):,d}"),
+                ("Vulnerability alerts (Dependabot)", f"⚠ {len(fails)} repo(s) failed" if fails else "✓ active",
+                 f"{va.get('total', 0):,d}"),
                 ("Code scanning",   "✓ active" if cs_status == "ok" else f"⚠ {cs_status}", str(len(raw.get("code_scanning", [])))),
                 ("Secret scanning", "✓ active" if ss_status == "ok" else f"⚠ {ss_status}", str(len(raw.get("secret_scanning", [])))),
             ],
@@ -432,7 +435,8 @@ def build_report(raw: dict) -> str:
             lines += [
                 "",
                 "### CRITICAL/HIGH with No Fix Available",
-                "> These cannot be patched — suppression with rationale is the correct action.",
+                f"> No patched version published yet. Showing {len(va['no_fix_critical_high'])} of "
+                f"{va.get('no_fix_critical_high_total', len(va['no_fix_critical_high']))}.",
                 "",
                 md_table(
                     ["Repository", "Package", "Severity", "CVE", "Summary"],

@@ -112,7 +112,8 @@ prompt the user for them:
 
 Also offer the optional values while you're there: `owner_project` / `default_scope` (where
 outputs land — a project slug or `workspace`), `dashboard_title` (defaults to
-"Security Dashboard"), and `annotations` (event markers on the Trend tab — fine to leave empty).
+"Security Dashboard"), `annotations` (event markers on the Trend tab — fine to leave empty),
+and `trend_start` (YYYYMMDD; where the What moved trend line begins — empty shows every snapshot).
 
 Validate before saving: `gh api orgs/<org> --jq .login` resolves, and
 `aws sts get-caller-identity --profile <profile>` succeeds. Write the confirmed values to
@@ -197,6 +198,15 @@ Also writes `$REPORTS_DIR/<YYYYMMDD>/snapshot.json` — a slim per-day archive t
 the dashboard embeds for its date picker, and that Step 6 reads for the GitHub and
 correlation counts. The rendered `security-dashboard.html` always lands at the top of `$REPORTS_DIR/`.
 
+Its **What moved** tab shows each snapshot against the previous one and against the
+30-day basis, computed by the same code as Step 6's `movement.md`. Fixed panels, the same
+every snapshot: a verdict with a trend line and plain-language warnings, the waterfall by
+fixing action, What to fix next (the remediation levers with links to GitHub and
+Inspector) and the repo movers. Between them, **Why it moved** is the note from Step 6,
+drawn from the blocks you chose. The newest snapshot carries all of it; older ones carry
+the verdict, the waterfall and the note. `trend_start` in config sets where the trend line begins. The page's JavaScript lives
+in `scripts/dashboard/` and is inlined at build, so the page stays one file.
+
 ---
 
 ## Step 6 — Explain the movement
@@ -213,9 +223,32 @@ write. If it fails, warn and continue to Step 7. These
 are the deterministic half: headline counts, the Inspector decomposition, controls,
 movers, remediation levers and host evidence. The artifact describes its own sections.
 Then write the **Why it moved** note below the marker in `movement.md`, replacing the
-stub; everything below the marker survives the next run. Shape: a bold headline with
-the size of the move, one bullet per driver with its size, then the lever; under about
-25 lines. When nothing material moved, one line saying so is a note.
+stub; everything below the marker survives the next run. The note is the part of the
+dashboard's What moved tab that you compose: read `scripts/dashboard/STYLEGUIDE.md` first.
+It sets the shape (an opening sentence with the size of the move, then one `###`
+section per driver, largest first, each ending at its action), and which form suits
+which finding: a `stat` block for a number that carries the point, a `bar` or `line`
+chart when the shape of the numbers is the point, a table, bullets, or a `callout` for
+a gap the reader must not miss. The fixed panels (verdict, waterfall, What to fix next,
+repo movers) are drawn from the data every time; do not repeat them.
+
+````markdown
+**Inspector critical + high fell 75% (97,555 → 24,154). About three quarters is remediation.**
+
+### Four repos moved to slim runtime images on 12 Oct
+```stat
+{"value": "−54k", "label": "critical + high removed", "tone": "fix"}
+```
+Their final stage now runs on a slim base. [svc-01](https://github.com/<org>/svc-01) went 15,234 → 20.
+````
+
+Engineers act on the note, so write it plainly. Under about one screen. When nothing
+material moved, the opening sentence alone is a note.
+
+Once the note is written, run Step 5's command again so the dashboard's What moved tab
+carries it, and deploy only after that rebuild. Check the tab: a block that does not
+validate shows as an error with the reason. A `--compare-to` comparison stays in its file:
+the page shows only the previous-snapshot and 30-day ones.
 
 State why the headline numbers moved, not just that they moved. A delta without a
 driver is not a finding.
@@ -231,7 +264,8 @@ Event history keeps 90 days; beyond that a prior value is unknown unless a trail
 archives it, so say that rather than guess it. A movement that looks estate-wide is routinely one base image or a handful of
 repos.
 
-**An Inspector count is images × findings per image.** Retention policies, deleted
+**ECR critical + high is images with findings × critical + high per image; EC2 and Lambda findings
+sit outside it.** Retention policies, deleted
 images, scan eligibility expiring and repos entering scope move it as much as risk does.
 When the inventory flag fires, size the inventory part in the note: a fall from removing
 old images is not remediation, and reporting it as one overstates the work. Judge

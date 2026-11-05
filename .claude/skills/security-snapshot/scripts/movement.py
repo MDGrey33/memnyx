@@ -27,8 +27,7 @@ DEFAULT_MOVER_LIMIT = 10
 
 # Kernel and kernel-header packages. In a container they are build headers,
 # not a running kernel, and they leave the image when it stops carrying a
-# toolchain. Kept in step with posture_snapshot.KERNEL_PKGS; not imported, because
-# that module needs AWS credentials at import.
+# toolchain. posture_snapshot imports this; the reverse would need boto3.
 KERNEL_PACKAGES = {"linux", "linux-libc-dev", "linux-headers"}
 
 # The single place field paths live. `sum` metrics go None if ANY part is

@@ -1,6 +1,4 @@
 """Tests for movement.py, movement_markdown.py and emit_movement.resolve_targets."""
-import copy
-import json
 import sys
 import unittest
 from pathlib import Path

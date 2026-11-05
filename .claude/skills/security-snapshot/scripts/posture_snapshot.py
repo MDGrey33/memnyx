@@ -14,7 +14,7 @@ The account ID is derived at runtime via STS — never hardcoded.
 Sections produced:
   1. Coverage (ECR images / EC2 / Lambda)
   2. Total findings (C / H / M)
-  3. Fan-out summary (unique CVEs, avg fan-out, addressable estimate)
+  3. Fan-out summary (unique CVEs, average fan-out)
   4. Top CVEs by C+H (TITLE aggregation)
   5. Top packages by finding count
   6. Repositories ranked by C+H
@@ -36,6 +36,7 @@ from config_util import (
     require as _require,
     resolve_reports_dir as _resolve_reports_dir,
 )
+from movement import KERNEL_PACKAGES
 
 try:
     import boto3
@@ -58,10 +59,6 @@ _CFG    = _load_config()
 PROFILE = _require(_CFG, "aws_profile")
 REGION  = _require(_CFG, "aws_region")
 
-# Kernel / no-fix package names — excluded from addressable estimate.
-# These are OS-level packages that can't be patched individually;
-# they close only with a base OS image upgrade.
-KERNEL_PKGS = {"linux", "linux-libc-dev", "linux-headers"}
 
 
 # ── AWS client ────────────────────────────────────────────────────────────────
@@ -372,8 +369,8 @@ def rebuild_comparison(c, ecr, since, basis=None):
 def get_title_stats(responses):
     """
     Summarise TITLE aggregation responses.
-    Returns a dict with unique_count, top CVEs, and package-level totals
-    for computing the addressable estimate.
+    Returns a dict with unique_count, the number of packages named in titles
+    and the top CVEs.
     """
     pkg_totals = defaultdict(lambda: {"c": 0, "h": 0, "m": 0, "titles": 0})
     all_titles = []
@@ -399,18 +396,10 @@ def get_title_stats(responses):
     # Top 50 by CRITICAL+HIGH
     top = sorted(all_titles, key=lambda x: x["c"] + x["h"], reverse=True)[:50]
 
-    # Addressable estimate: sum C+H for non-kernel packages
-    addressable_ch = sum(
-        v["c"] + v["h"]
-        for pkg, v in pkg_totals.items()
-        if pkg not in KERNEL_PKGS
-    )
-
     return {
         "unique_count": len(responses),
         "pkg_count": len(pkg_totals),
         "top_by_ch": top,
-        "addressable_ch_excl_kernel": addressable_ch,
     }
 
 
@@ -742,7 +731,6 @@ def build_report(raw):
 
     unique_cves  = title_stats.get("unique_count", 0)
     fan_out      = round(raw_total / unique_cves, 1) if unique_cves else 0
-    addressable  = title_stats.get("addressable_ch_excl_kernel", 0)
 
     lines = [
         "# AWS Inspector V2 Posture Snapshot",
@@ -781,14 +769,8 @@ def build_report(raw):
                     ("Raw findings (C+H+M)",               f"{raw_total:,d}"),
                     ("Unique CVE titles",                   f"{unique_cves:,d}"),
                     ("Average fan-out",                     f"~{fan_out:,.0f}×"),
-                    ("Addressable C+H (excl. kernel pkgs)", f"~{addressable:,d}"),
-                    ("Unique packages affected",            str(title_stats.get("pkg_count", "–"))),
                 ],
             ),
-            "",
-            "> Addressable = CRITICAL+HIGH CVEs on packages where a fix exists or an upgrade",
-            "> is possible. Kernel/libc CVEs are excluded — they close with a base OS image",
-            "> upgrade, not individual patches.",
         ]
     else:
         lines.append("> Title aggregation not available in this run.")
@@ -832,10 +814,11 @@ def build_report(raw):
 
     # Base layers
     if layer_stats:
-        lines += ["", "## Dominant Base Layers", ""]
+        shared = [l for l in layer_stats if l.get("repos", 0) >= 2]
+        lines += ["", "## Shared Base Layers", ""]
         lines += [
-            "> Layers shared across many images. The top entry is typically the base OS layer.",
-            "> One `FROM` change in the Dockerfile closes all findings tied to that layer.",
+            f"> Layers present in two or more repos ({len(shared)} of {len(layer_stats)} captured). What to fix",
+            "> next on the dashboard ranks the shared-layer change against the other levers.",
             "",
         ]
         layer_rows = [
@@ -848,7 +831,7 @@ def build_report(raw):
                 f"{l['m']:,d}",
                 f"{l['c']+l['h']+l['m']:,d}",
             ]
-            for l in layer_stats[:15]
+            for l in shared[:15]
         ]
         lines.append(
             md_table(
@@ -1047,7 +1030,7 @@ def main():
     print(f"   queried {manager_stats['queried']}, reused {manager_stats['reused']}, "
           f"unknown {manager_stats['unknown']}", flush=True)
     managers = {r["package"]: r["manager"] for r in manager_rows}
-    lever_pkgs = {n for n in names if n in KERNEL_PKGS or managers.get(n) == "GENERIC"}
+    lever_pkgs = {n for n in names if n in KERNEL_PACKAGES or managers.get(n) == "GENERIC"}
     print(f"→ per-repo breakdown for {len(lever_pkgs)} kernel-header and bundled-runtime packages ...", flush=True)
     repo_names = [r.get("repositoryAggregation", {}).get("repository") for r in repositories]
     breakdown = package_breakdown(c, lever_pkgs, [r for r in repo_names if r])

@@ -21,10 +21,8 @@ Adds three analytical lenses beyond the CVE/package zone analysis:
 
   Lens 1 — Combined repo rankings:  Inspector + GitHub + code scanning + secrets
             per-repo score surfaces the true top offenders across all four signals.
-  Lens 2 — Package quick-win table: impact/effort score for Zone A packages.
-            (Inspector C+H + GitHub C+H) × repos_affected / effort.
   Lens 3 — Offender convergence:    repos that rank in the top tier across
-            multiple categories simultaneously (the "fix this first" shortlist).
+            multiple categories simultaneously.
 """
 import argparse
 import json
@@ -221,7 +219,7 @@ def correlate(insp: dict, gh: dict) -> dict:
         })
     pkg_overlap.sort(key=lambda x: (-x["combined_ch"], x["package"]))
 
-    # Zone B — Inspector only (not in GitHub — transitive/build deps)
+    # Zone B — Inspector only (not flagged by Dependabot)
     zone_b_cves = insp_cves - gh_cves
     zone_b = [
         {"cve": c, **insp["by_cve"][c]}
@@ -356,98 +354,12 @@ def build_repo_combined_ranking(insp_raw: dict, gh_raw: dict) -> list[dict]:
     return sorted(result, key=lambda x: (-x["combined_score"], x["repo"]))
 
 
-# ── Lens 2: Package quick-win scoring ─────────────────────────────────────────
-
-# Effort categories — mirrors Inspector's T/B/S/P.
-# Tunable defaults: these are public npm packages with publicly documented
-# no-fix/abandoned status. Extend per your stack as your scans surface more.
-STRUCTURAL_PKGS = {"vm2"}            # abandoned — no fix ever; must migrate
-NO_FIX_PKGS     = {"dicer", "xlsx", "lodash.set", "ip", "lodash.template",
-                    "url-regex", "babel-traverse", "pdf-image", "hoek"}
-
-# Repo-count threshold separating Trivial from Bounded.
-# ≤ TRIVIAL_REPOS_MAX: one engineer can sweep all affected services in a day.
-# > TRIVIAL_REPOS_MAX: coordinated work across multiple teams — a sprint item.
-TRIVIAL_REPOS_MAX = 5
-
-# Human-readable effort definitions — rendered verbatim in the report.
-EFFORT_DEFINITIONS = [
-    ("Trivial",    "1",
-     f"Fix available. One version bump per service, no breaking change, no "
-     f"coordination overhead. Affects ≤{TRIVIAL_REPOS_MAX} repos. One engineer, hours to a day."),
-    ("Bounded",    "2",
-     f"Fix available but used across many repos (>{TRIVIAL_REPOS_MAX}). Each fix is a version "
-     "bump; the effort is coordinating the sweep across services. Days to one sprint."),
-    ("Phantom",    "3",
-     "No upstream patch exists. Suppress in Security Hub / GitHub with documented "
-     "rationale and 90-day review date. Not a remediation item until a fix ships."),
-    ("Structural", "4",
-     "Package is abandoned or requires an architectural migration. A version bump "
-     "cannot fix it. Engineering design required before execution. Sprint+."),
-]
-
-
-def build_package_quickwin(pkg_overlap: list[dict], gh_raw: dict) -> list[dict]:
-    """
-    Score Zone A packages by (combined_ch × repos_affected) / effort.
-
-    Effort scale (see EFFORT_DEFINITIONS):
-      1 = Trivial   — version bump, ≤5 repos
-      2 = Bounded   — version bump, 6+ repos (multi-team sweep)
-      3 = Phantom   — no fix available; suppress, don't remediate
-      4 = Structural — abandoned package; migration required
-    """
-    # Build fix-available map from GitHub raw alerts
-    fix_map: dict[str, dict] = {}
-    for a in gh_raw.get("vuln_alerts_detail", []):
-        pkg = (a.get("package") or "").lower()
-        if pkg not in fix_map:
-            fix_map[pkg] = {"fix": False, "patched": None}
-        if a.get("fix_available"):
-            fix_map[pkg]["fix"] = True
-            if not fix_map[pkg]["patched"]:
-                fix_map[pkg]["patched"] = a.get("patched")
-
-    result = []
-    for p in pkg_overlap:
-        pkg         = p["package"]
-        combined_ch = p["combined_ch"]
-        gh_repos    = p["gh_repos"]
-        fix_info    = fix_map.get(pkg, {"fix": False, "patched": None})
-
-        if pkg in STRUCTURAL_PKGS:
-            effort, effort_label = 4, "Structural"
-        elif pkg in NO_FIX_PKGS or not fix_info["fix"]:
-            effort, effort_label = 3, "Phantom"
-        elif gh_repos > TRIVIAL_REPOS_MAX:
-            effort, effort_label = 2, "Bounded"
-        else:
-            effort, effort_label = 1, "Trivial"
-
-        # Quick-win score: (combined impact × repos it closes) / effort units
-        qw_score = round((combined_ch * max(gh_repos, 1)) / effort)
-
-        result.append({
-            "package":        pkg,
-            "insp_crit":      p["insp_crit"],
-            "insp_high":      p["insp_high"],
-            "gh_crit":        p["gh_crit"],
-            "gh_high":        p["gh_high"],
-            "gh_repos":       gh_repos,
-            "combined_ch":    combined_ch,
-            "fix_available":  fix_info["fix"],
-            "patched":        fix_info["patched"],
-            "effort":         effort,
-            "effort_label":   effort_label,
-            "quickwin_score": qw_score,
-        })
-
-    return sorted(result, key=lambda x: (-x["quickwin_score"], x["package"]))
-
-
 # ── Lens 3: Offender convergence ──────────────────────────────────────────────
 
-def build_offender_convergence(repo_ranking: list[dict], top_n: int = 15) -> list[dict]:
+CONVERGENCE_TOP_N = 15
+
+
+def build_offender_convergence(repo_ranking: list[dict], top_n: int = CONVERGENCE_TOP_N) -> list[dict]:
     """
     Repos that rank in the top tier across multiple signal categories.
     A repo scoring in top-15 on 3+ signals is the highest-priority fix target.
@@ -495,7 +407,6 @@ def build_report(corr: dict, gh_raw: dict, ts: str) -> str:
     zone_b      = corr["zone_b_inspector_only"]
     zone_c      = corr["zone_c_github_only"]
     repo_rank   = corr.get("repo_combined_ranking", [])
-    pkg_qw      = corr.get("package_quickwin", [])
     convergence = corr.get("offender_convergence", [])
 
     cs_alerts = gh_raw.get("code_scanning", [])
@@ -509,19 +420,6 @@ def build_report(corr: dict, gh_raw: dict, ts: str) -> str:
         "> Inspector V2 data covers deployed images (ECR) + EC2 instances.",
         "> GitHub data covers source code (Dependabot) + SAST (Code Scanning) + secrets.",
         "",
-        "## Effort Categories",
-        "",
-        "Used throughout this document (Package Quick-Win table, remediation guidance).",
-        "",
-        md_table(
-            ["Category", "Effort score", "Definition"],
-            [(name, score, defn) for name, score, defn in EFFORT_DEFINITIONS]
-        ),
-        "",
-        "> **Trivial/Bounded split**: the ≤5 / 6+ repo threshold is a coordination proxy, not a",
-        "> severity distinction. A Bounded fix is the same operation repeated N times; the team",
-        "> needs to plan a sweep sprint rather than one-off it.",
-        "",
         "## Summary",
         "",
         md_table(
@@ -529,17 +427,18 @@ def build_report(corr: dict, gh_raw: dict, ts: str) -> str:
             [
                 ("Inspector CVEs (in title aggregation top-50)", str(s["insp_cves_total"])),
                 ("GitHub CVEs (all Dependabot alerts)",           str(s["gh_cves_total"])),
-                ("Zone A — CVE in BOTH sources",                  f"**{s['cves_in_both']}**"),
+                ("Zone A — CVE in BOTH sources (of the Inspector top 50)", f"**{s['cves_in_both']}**"),
                 ("Zone A — Package in BOTH sources",              f"**{s['pkgs_in_both']}**"),
-                ("Zone B — Inspector only (build/transitive deps)", str(s["cves_inspector_only"])),
-                ("Zone C — GitHub only (may be fixed in image)",  str(s["cves_github_only"])),
+                ("Zone B — Inspector only (of the Inspector top 50)", str(s["cves_inspector_only"])),
+                ("Zone C — GitHub only",                          str(s["cves_github_only"])),
                 ("Code scanning alerts",                          str(len(cs_alerts))),
-                ("Secret scanning alerts (OPEN)",                 f"**{ss_count}** ← P0"),
+                ("Secret scanning alerts (open, default secret types)", f"**{ss_count}** ← rotate first" if ss_count else "0"),
             ],
         ),
         "",
-        "> **Zone A = highest priority.** Same vulnerability confirmed in both the",
-        "> deployed image AND the source code. Fix closes findings in both scanners.",
+        "> Zone A: the same vulnerability in the deployed image and in the source code.",
+        "> The CVE zones compare Inspector's 50 CVEs with the most findings against every",
+        "> Dependabot alert; the package overlap uses every package.",
         "",
         "## Zone A — CVEs in Both Sources (top 25 by combined score)",
         "",
@@ -572,7 +471,6 @@ def build_report(corr: dict, gh_raw: dict, ts: str) -> str:
         "## Zone A — Package Overlap (top 30 by combined C+H)",
         "",
         "> Package name appears in both Inspector findings AND GitHub Dependabot.",
-        "> Fix closes vulnerabilities in image AND source simultaneously.",
         "",
     ]
     if pkg_ov:
@@ -597,9 +495,9 @@ def build_report(corr: dict, gh_raw: dict, ts: str) -> str:
             "",
             "## Combined Repo Rankings — All Four Signals",
             "",
-            "> Score = Inspector(C×10 + H×3) + GitHub(C×50 + H×15) + CodeScan×5 + Secrets×100.",
-            "> GitHub findings are weighted higher — no fan-out inflation; confirmed in source.",
-            "> Secrets carry the heaviest weight: exposed credentials are P0 regardless of count.",
+            f"> Score = Inspector(C×{W_INSP_CRIT} + H×{W_INSP_HIGH}) + GitHub(C×{W_GH_CRIT} + H×{W_GH_HIGH})"
+            f" + CodeScan×{W_CODE_SCAN} + Secrets×{W_SECRET}.",
+            "> GitHub findings are weighted higher: no fan-out inflation, confirmed in source.",
             "",
             md_table(
                 ["Repository", "Insp C", "Insp H", "GH C", "GH H", "Code Scan", "Secrets", "Score"],
@@ -619,8 +517,7 @@ def build_report(corr: dict, gh_raw: dict, ts: str) -> str:
             "",
             "## Top Offenders — Repos Flagged by Multiple Signals",
             "",
-            "> Repos appearing in the top 15 of 2 or more signal categories.",
-            "> These are the highest-confidence fix targets — verified across independent scanners.",
+            f"> Repos appearing in the top {CONVERGENCE_TOP_N} of 2 or more signal categories.",
             "",
             md_table(
                 ["Repository", "Signals", "Insp C+H", "GH C+H", "Code Scan", "Secrets"],
@@ -638,46 +535,11 @@ def build_report(corr: dict, gh_raw: dict, ts: str) -> str:
             ),
         ]
 
-    # ── Lens 2: Package quick-win ─────────────────────────────────────────────
-    if pkg_qw:
-        trivial_count  = sum(1 for p in pkg_qw if p["effort"] == 1)
-        bounded_count  = sum(1 for p in pkg_qw if p["effort"] == 2)
-        phantom_count  = sum(1 for p in pkg_qw if p["effort"] == 3)
-        struct_count   = sum(1 for p in pkg_qw if p["effort"] == 4)
-        lines += [
-            "",
-            "## Package Quick-Win Ranking",
-            "",
-            f"> **{trivial_count} Trivial · {bounded_count} Bounded · "
-            f"{phantom_count} Phantom · {struct_count} Structural** "
-            f"(see Effort Categories section above for definitions).",
-            ">",
-            "> Score = (Inspector C+H + GitHub C+H) × repos_affected ÷ effort.",
-            "> Higher score = more findings closed per unit of engineering work.",
-            "",
-            md_table(
-                ["Package", "Effort", "Insp C+H", "GH C+H", "GH Repos", "Fix?", "QW Score"],
-                [
-                    [
-                        p["package"][:35],
-                        p["effort_label"],
-                        p["insp_crit"] + p["insp_high"],
-                        p["gh_crit"] + p["gh_high"],
-                        p["gh_repos"],
-                        "✓" if p["fix_available"] else "✗",
-                        f"{p['quickwin_score']:,d}",
-                    ]
-                    for p in pkg_qw[:30]
-                ],
-            ),
-        ]
-
     lines += [
         "",
         "## Zone B — Inspector Only (top 20 by C+H)",
         "",
         "> In the deployed image but not flagged by Dependabot.",
-        "> Likely transitive / build-only dependencies, or packages not in source lock file.",
         "",
     ]
     if zone_b:
@@ -691,9 +553,7 @@ def build_report(corr: dict, gh_raw: dict, ts: str) -> str:
         "",
         "## Zone C — GitHub Only (top 20 by alert count)",
         "",
-        "> In source code, not flagged by Inspector.",
-        "> Image may have been updated but source lock file not cleaned up,",
-        "> or the package is not deployed to a scanned ECR image.",
+        "> In source code, not among the 50 Inspector CVEs with the most findings.",
         "",
     ]
     if zone_c:
@@ -791,12 +651,6 @@ def main():
     repo_ranking = build_repo_combined_ranking(insp_raw, gh_raw)
     corr["repo_combined_ranking"] = repo_ranking
     print(f"   {len(repo_ranking)} repos ranked", flush=True)
-
-    print("→ Scoring package quick-wins ...", flush=True)
-    pkg_qw = build_package_quickwin(corr["zone_a_pkg_overlap"], gh_raw)
-    corr["package_quickwin"] = pkg_qw
-    trivial = sum(1 for p in pkg_qw if p["effort"] == 1)
-    print(f"   {len(pkg_qw)} Zone A packages scored — {trivial} Trivial (version bump)", flush=True)
 
     print("→ Building offender convergence ...", flush=True)
     convergence = build_offender_convergence(repo_ranking)

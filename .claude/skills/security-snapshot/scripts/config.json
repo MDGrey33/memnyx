@@ -10,6 +10,7 @@
 
   "dashboard_title": "Security Dashboard",
   "annotations": [],
+  "trend_start": "",
 
   "_doc": {
     "owner_project": "Project slug whose artifacts/security-snapshot/ holds this skill's load-bearing dashboard + snapshot history, or 'workspace'.",
@@ -18,6 +19,7 @@
     "aws_profile": "AWS CLI/boto3 profile with Inspector2 + STS read access (REQUIRED). Read-only credentials recommended.",
     "aws_region": "AWS region where Inspector V2 runs (REQUIRED).",
     "dashboard_title": "Title shown in the dashboard header and browser tab. Optional — defaults to 'Security Dashboard'.",
-    "annotations": "Event markers rendered as vertical lines on the Trend tab. Each entry: {date: YYYYMMDD, label: text}. Optional — empty list is fine."
+    "annotations": "Event markers rendered as vertical lines on the Trend tab. Each entry: {date: YYYYMMDD, label: text}. Optional — empty list is fine.",
+    "trend_start": "First snapshot (YYYYMMDD) on the What moved tab's trend line. Set it past early snapshots that would flatten the line. Optional — empty shows every snapshot."
   }
 }

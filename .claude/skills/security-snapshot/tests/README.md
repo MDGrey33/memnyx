@@ -1,6 +1,8 @@
 # Tests
 
-Stdlib only — no install needed.
+Needs `boto3`, the same as the skill: the capture tests import `posture_snapshot.py`,
+which imports it. Install it as `SKILL.md` describes. The dashboard's JavaScript tests (`tests/js/`) need
+`node` and no packages; `test_dashboard_js.py` runs them, and skips them when node is absent.
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests   # from the skill root
@@ -12,6 +14,19 @@ To run the suite before every commit, from the skill directory:
 The hook works whether the skill is its own repo or sits under `.claude/skills/` in a larger one; in a
 larger repo it runs only for commits that touch the skill. It blocks a commit when any test fails.
 Mutants stay manual (about a minute).
+
+## Guards
+
+Three tests catch failures that otherwise surface only in a live run or after publishing:
+
+- `test_capture_main.py` and `test_github_capture_main.py` run each capture's `main()` end to
+  end with `--save --raw`, on fixture data with AWS and `gh` stubbed.
+- `test_static_names.py` fails on a name a script uses but never defines, including one taken
+  from another script (`from movement import X`, `movement.X`).
+- `test_no_real_identifiers.py` fails if any shipped file names the real org or AWS profile
+  (from `config.local.json`), or an account, namespace or hyphenated repo name from any
+  snapshot in the reports folder. Each source skips, with its reason, when absent, so on a
+  fresh clone this test checks nothing.
 
 ## Fixtures
 

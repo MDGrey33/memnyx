@@ -38,9 +38,9 @@ LEVERS = {
                    "One change reaches every repo listed."),
     },
     "dependabot_dependencies": {
-        "title": "Merge the dependency updates Dependabot already raised",
+        "title": "Bump the packages Dependabot also flags",
         "owner": "service team",
-        "action": "The fix path exists as a Dependabot PR; merge or unblock it.",
+        "action": "Inspector finds these in the images and Dependabot in the source. Bump them in the service; a Dependabot PR may already be open.",
     },
 }
 
@@ -111,7 +111,8 @@ def bundled_runtimes(rows, kernel_packages):
 
 
 def base_layers(curr, rows):
-    """Shared base layers ranked by critical+high, net of findings the two levers above already count.
+    """Shared base layers ranked by critical+high, net of findings the kernel-header and
+    bundled-runtime levers already count.
 
     Without the breakdown the gross count is shown and says so: the same
     findings would otherwise be promised by two levers.
@@ -144,21 +145,27 @@ def base_layers(curr, rows):
 
 
 def dependabot_dependencies(curr, managers, application_managers):
-    """Application packages Inspector flags that Dependabot also flags, by critical+high."""
+    """Application packages Inspector flags that Dependabot also flags, by critical+high.
+
+    Each row also carries the GitHub side of the overlap: the package's critical +
+    high Dependabot alerts and the repos they are in (None when not captured)."""
     zone = _get(curr, "correlation", "correlation", "zone_a_pkg_overlap")
     pkgs = _get(curr, "raw", "packages")
     if not isinstance(zone, list) or not isinstance(pkgs, list):
         return None
-    names = {z.get("package") for z in zone if z.get("package")}
+    by_name = {z["package"]: z for z in zone if z.get("package")}
     out = []
     for p in pkgs:
         a = p.get("packageAggregation") or {}
         n = a.get("packageName")
-        if n in names and (managers or {}).get(n) in application_managers:
+        if n in by_name and (managers or {}).get(n) in application_managers:
             sc = a.get("severityCounts") or {}
             ch = (sc.get("critical") or 0) + (sc.get("high") or 0)
             if ch:
-                out.append({"package": n, "ch": ch, "manager": managers[n]})
+                z = by_name[n]
+                gh = (None if z.get("gh_crit") is None and z.get("gh_high") is None
+                      else (z.get("gh_crit") or 0) + (z.get("gh_high") or 0))
+                out.append({"package": n, "ch": ch, "manager": managers[n], "gh_ch": gh, "gh_repos": z.get("gh_repos")})
     out.sort(key=lambda x: (-x["ch"], x["package"]))
     return _lever("dependabot_dependencies", sum(x["ch"] for x in out), out[:ROWS_SHOWN], packages=len(out))
 
