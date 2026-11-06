@@ -379,6 +379,17 @@ class TestPackageBreakdown(unittest.TestCase):
         b = lv.base_layers({"raw": {"layers": layers}}, r["rows"], r["kernel_repos"], self.K)
         self.assertEqual(b["rows"][0]["ch"], 2)
 
+    def test_a_finding_naming_two_bundled_packages_is_netted_once(self):
+        f = finding("openssl/openssl", "ns/a", "i1", layer="L1", others=("go/stdlib",), arn="arn:1")
+        f["packageVulnerabilityDetails"]["vulnerablePackages"][0].update(version="1.22", sourceLayerHash="L1")
+        names = {"go/stdlib", "openssl/openssl"}
+        r = ps.package_breakdown(FindingsStub({("go/stdlib", "ns/a"): [f], ("openssl/openssl", "ns/a"): [f]}),
+                                 names, ["ns/a"], kernel_names=self.K)
+        self.assertEqual({(x["package"], x["ch"]) for x in r["rows"]}, {("go/stdlib", 1), ("openssl/openssl", 1)})
+        layers = [{"layer": "L1", "c": 0, "h": 3, "images": 1, "repo_list": ["ns/a", "ns/b"]}]
+        b = lv.base_layers({"raw": {"layers": layers}}, r["rows"], r["kernel_repos"], self.K)
+        self.assertEqual(b["rows"][0]["ch"], 2)
+
     def test_any_failure_leaves_no_rows(self):
         r = ps.package_breakdown(FindingsStub(self.F, fail=("linux", "ns/b")), {"linux"}, ["ns/a", "ns/b"])
         self.assertTrue(r["status"].startswith("failed"))

@@ -519,9 +519,10 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS, kernel_na
     no record (None), never an empty one: an empty one reads as no kernel
     findings at all.
 
-    A row's `layers` is the base-layer netting basis, so it leaves out findings
-    that also name a kernel package: those are netted once, through the kernel
-    record. Inspector leaves the in-use fields off an image it has never seen
+    A row's `layers` is the base-layer netting basis, so each finding sits in
+    the layers of one row only: a finding that also names a kernel package is
+    netted through the kernel record, and one that names two other packages is
+    netted under the first row that holds it. Inspector leaves the in-use fields off an image it has never seen
     running, so a missing count reads as not running. When no finding in the
     capture carries one, in-use tracking is not reporting, and every
     `running_ch` is None rather than a zero nobody measured.
@@ -530,8 +531,8 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS, kernel_na
     remediation question is "which repos", which the per-package aggregation
     cannot answer. Each row carries what the fix needs: distinct images, how
     many findings already have a fixed version, the image OS, the installed
-    package versions, and the layers the package sits in (so the base-layer
-    lever can avoid counting the same findings twice).
+    package versions, and the layers its findings sit in, for the base-layer
+    lever to net off (see below for which findings each row carries there).
 
     One query per (package, repo) when `repos` is given, run in parallel: a
     single kernel package can carry tens of thousands of findings, and one
@@ -564,7 +565,7 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS, kernel_na
     except AWS_ERRORS as e:
         print(f"  WARN: package breakdown failed — field left empty: {e}", file=sys.stderr)
         return {**out, "status": f"failed: {_code(e)}", "rows": None, "kernel_repos": None}
-    acc, kernel, tracked = {}, {}, False
+    acc, kernel, tracked, netted = {}, {}, False, set()
     for found in results:
         for name, f in found:
                 vp = next((v for v in (f.get("packageVulnerabilityDetails") or {}).get("vulnerablePackages") or []
@@ -592,7 +593,11 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS, kernel_na
                 netted_as_kernel = kernel_names is not None and name not in kernel_names and any(
                     v.get("name") in kernel_names
                     for v in (f.get("packageVulnerabilityDetails") or {}).get("vulnerablePackages") or [])
-                if vp.get("sourceLayerHash") and not netted_as_kernel:
+                # Only an ARN proves two rows hold the same finding; without one, count it.
+                arn = f.get("findingArn")
+                if vp.get("sourceLayerHash") and not netted_as_kernel and not (arn and arn in netted):
+                    if arn:
+                        netted.add(arn)
                     r["layers"][vp["sourceLayerHash"]] += 1
                 if kernel_names is not None and name in kernel_names:
                     _kernel_finding(kernel, repo, f, res, img, kernel_names)
