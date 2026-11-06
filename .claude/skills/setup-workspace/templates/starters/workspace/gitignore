@@ -8,3 +8,6 @@ contributions/
 
 # Macos
 .DS_Store
+
+# Generated per machine by /setup-workspace (bakes in this machine's path)
+shell/memnyx.sh
