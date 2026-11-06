@@ -88,6 +88,29 @@ FIELD_ROLES = {
     "raw.json:.node_os.nodes[].image_created": "PUBLIC",
     "raw.json:.node_os.nodes[].latest": "PUBLIC",
     "raw.json:.node_os.nodes[].latest_published": "PUBLIC",
+    "raw.json:.node_os.other_archs[]": "PUBLIC",
+    "raw.json:.scan_coverage.status": "PUBLIC",
+    "raw.json:.scan_coverage.windows.push": "PUBLIC",
+    "raw.json:.scan_coverage.windows.use": "PUBLIC",
+    "raw.json:.scan_coverage.windows.mode": "PUBLIC",
+    "raw.json:.scan_coverage.images[].repo": "ECR_REPO",
+    "raw.json:.scan_coverage.images[].digest": "LAYER",
+    "raw.json:.scan_coverage.images[].status": "PUBLIC",
+    "raw.json:.scan_coverage.images[].reason": "PUBLIC",
+    "raw.json:.scan_coverage.images[].pushed_at": "PUBLIC",
+    "raw.json:.scan_coverage.images[].last_in_use_at": "PUBLIC",
+    "raw.json:.scan_coverage.images[].last_pulled_at": "PUBLIC",
+    "raw.json:.scan_coverage.images[].last_scanned_at": "PUBLIC",
+    "raw.json:.scan_coverage.images[].lapse_at": "PUBLIC",
+    "raw.json:.scan_coverage.images[].platforms[].digest": "LAYER",
+    "raw.json:.scan_coverage.images[].platforms[].platform": "PUBLIC",
+    "raw.json:.scan_coverage.functions[].function": "FUNCTION",
+    "raw.json:.scan_coverage.functions[].repo": "ECR_REPO",
+    "raw.json:.scan_coverage.functions[].digest": "LAYER",
+    "raw.json:.scan_coverage.functions[].last_modified": "PUBLIC",
+    "raw.json:.scan_coverage.functions[].status": "PUBLIC",
+    "raw.json:.scan_coverage.functions[].reason": "PUBLIC",
+    "raw.json:.scan_coverage.functions[].lapse_at": "PUBLIC",
     # github-raw.json
     "github-raw.json:.org": "ORG",
     "github-raw.json:.vuln_agg.top_repos[].repo": "REPO",
@@ -162,7 +185,8 @@ FIELD_ROLES = {
     "snapshot.json:.correlation.pkg_quickwin[].color": "PUBLIC",
 }
 
-IDENTIFIER_ROLES = {"ACCOUNT", "ORG", "ECR_REPO", "REPO", "LAYER", "AMI", "REGION"}
+# LAYER also covers image digests: the same sha256 shape, aliased the same way.
+IDENTIFIER_ROLES = {"ACCOUNT", "ORG", "ECR_REPO", "REPO", "LAYER", "AMI", "REGION", "FUNCTION"}
 
 # Alias grammar. The committed fixture test asserts every identifier position
 # matches its pattern, which works upstream where no real data exists.
@@ -174,6 +198,7 @@ ALIAS_PATTERNS = {
     "ECR_REPO": re.compile(r"^ns-\d+/svc-\d{2,}$"),
     "LAYER": re.compile(r"^sha256:[0-9a-f]{64}$"),
     "AMI": re.compile(r"^ami-[0-9a-f]{17}$"),
+    "FUNCTION": re.compile(r"^fn-\d{2,}$"),
 }
 
 
@@ -223,7 +248,7 @@ def build_aliases(snapshot_set: dict) -> dict:
     snapshot_set: {date: {filename: parsed_json}}. Raises UnclassifiedField
     on any string field not in FIELD_ROLES.
     """
-    names, namespaces, layers, amis, accounts, orgs, regions = set(), set(), set(), set(), set(), set(), set()
+    names, namespaces, layers, amis, accounts, orgs, regions, functions = set(), set(), set(), set(), set(), set(), set(), set()
     unclassified = set()
     for files in snapshot_set.values():
         for fname, data in files.items():
@@ -247,6 +272,8 @@ def build_aliases(snapshot_set: dict) -> dict:
                     orgs.add(value)
                 elif role == "REGION":
                     regions.add(value)
+                elif role == "FUNCTION":
+                    functions.add(value)
     if unclassified:
         raise UnclassifiedField(
             "Unclassified string fields — add each to FIELD_ROLES as an identifier role or PUBLIC:\n  "
@@ -260,6 +287,7 @@ def build_aliases(snapshot_set: dict) -> dict:
         "account": {v: FAKE_ACCOUNT for v in accounts},
         "org": {v: FAKE_ORG for v in orgs},
         "region": {v: FAKE_REGION for v in regions},
+        "function": {v: f"fn-{i:02d}" for i, v in enumerate(sorted(functions), 1)},
     }
 
 
@@ -279,6 +307,8 @@ def mask_value(role: str, value: str, aliases: dict) -> str:
         return aliases["org"][value]
     if role == "REGION":
         return aliases["region"][value]
+    if role == "FUNCTION":
+        return aliases["function"][value]
     return value
 
 
@@ -346,7 +376,7 @@ def find_leaks(masked: dict, aliases: dict, extra_terms: tuple[str, ...] = ()) -
     """
     leaks = []
     substrings = (set(aliases["account"]) | set(aliases["org"]) | set(aliases["layer"]) | set(aliases["ami"])
-                  | set(aliases.get("region", {})))
+                  | set(aliases.get("region", {})) | set(aliases.get("function", {})))
     substrings |= {f"{ns}/" for ns in aliases["ns"] if ns}
     substrings |= {t for t in extra_terms if t}
     real_names = set(aliases["name"])

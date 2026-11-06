@@ -373,3 +373,47 @@ test('every value from the data is escaped where it reaches the markup', () => {
   assert.match(h, /data-basis="x&#39;&gt;&lt;zz&gt;"/);
   assert.match(h, /\(&lt;zz&gt;E\)/);
 });
+
+const GAPS = (o = {}) => ({ running: 130, soon_days: 14, functions_measured: true, push_days: 30, use_days: 30, mode: 'LAST_IN_USE_AT',
+  not_scanned: [], lapsing: [], ...o });
+const gapRow = (name, kind, why, lapse) => ({ kind, name, image: 'ns-1/svc-01@aaaaaaaaaaaa', why, lapse });
+
+test('running but not scanned: each state is keyed in data-gaps and lists its rows', () => {
+  const { run } = page();
+  const gaps = g => run(`mvScanGaps(${JSON.stringify(g)})`);
+  const bad = gaps(GAPS({ not_scanned: [gapRow('fn-01', 'Lambda', 'rescanning lapsed', '2026-08-01')],
+                          lapsing: [gapRow('fn-02', 'Lambda', 'successful', '2026-11-25')] }));
+  assert.match(bad, /data-gaps="gaps"/);
+  assert.match(bad, /Running, not rescanned \(1\)[\s\S]*fn-01[\s\S]*<div class="mv-num" data-lapse>lapsed 2026-08-01</);
+  assert.match(bad, /Rescanning lapses within 14 days \(1\)[\s\S]*fn-02[\s\S]*data-lapse>lapses 2026-11-25</);
+  assert.match(bad, /a container Lambda stops being rescanned 30 days after its image was pushed/);
+  const soon = gaps(GAPS({ lapsing: [gapRow('fn-02', 'Lambda', 'successful', '2026-11-25')] }));
+  assert.match(soon, /data-gaps="lapsing"/);
+  assert.doesNotMatch(soon, /Running, not rescanned/);
+  assert.doesNotMatch(soon, /are being rescanned/);  // lapsing rows are not an all-clear
+  const clear = gaps(GAPS());
+  assert.match(clear, /data-gaps="clear"/);
+  assert.match(clear, /All 130 running images Inspector tracks are being rescanned/);
+  const noLambdas = gaps(GAPS({ functions_measured: false }));
+  assert.match(noLambdas, /Container Lambdas could not be read this run/);
+  assert.match(noLambdas, /All 130 running cluster images Inspector tracks/);  // never claims the Lambdas are clear
+  const life = gaps(GAPS({ push_days: null }));
+  assert.match(life, /rescans an image for as long as it exists after it is pushed, or 30 days/);
+  assert.doesNotMatch(life, /for  days|stops being rescanned/);
+  assert.doesNotMatch(gaps(GAPS({ use_days: null })), /whichever is later/);
+  assert.match(clear, /Fargate pods, are not checked/);
+  assert.doesNotMatch(clear, /could not be read/);
+  assert.match(gaps(GAPS({ mode: 'LAST_PULL_DATE' })), /after it was last pulled/);
+  assert.equal(gaps(null), '');
+  const esc = gaps(GAPS({ not_scanned: [gapRow('<b>x</b>', 'Lambda', '<i>y</i>', null)] }));
+  assert.match(esc, /&lt;b&gt;x&lt;\/b&gt;[\s\S]*&lt;i&gt;y&lt;\/i&gt;[\s\S]*data-lapse>no date</);
+});
+
+test('the scan-gaps panel sits after the levers on a full comparison', () => {
+  const g = GAPS({ not_scanned: [gapRow('fn-01', 'Lambda', 'rescanning lapsed', '2026-08-01')] });
+  const moved = JSON.parse(JSON.stringify(MOVED));
+  moved['20261021'][0].view.scan_gaps = g;
+  const h = html(page({ MOVED: moved }).run);
+  assert.ok(h.indexOf('Running but not scanned') > h.indexOf('What to fix next'));
+  assert.ok(h.indexOf('Running but not scanned') < h.indexOf('Biggest moves by repo'));
+});

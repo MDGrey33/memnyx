@@ -452,7 +452,10 @@ class Ec2Stub:
         if self.fail:
             raise ps.ClientError({"Error": {"Code": "UnauthorizedOperation"}}, "DescribeInstances")
         half = len(self.instances) // 2
-        return _Pager([{"Reservations": [{"Instances": [{"ImageId": i} for i in chunk]}]}
+        # An instance is an image id, or (image id, EC2 architecture).
+        def inst(i):
+            return {"ImageId": i[0], "Architecture": i[1]} if isinstance(i, tuple) else {"ImageId": i}
+        return _Pager([{"Reservations": [{"Instances": [inst(i) for i in chunk]}]}
                        for chunk in (self.instances[:half], self.instances[half:])])
 
     def describe_images(self, ImageIds):
@@ -485,6 +488,12 @@ class TestNodeOs(unittest.TestCase):
         self.assertEqual(r["nodes"][0]["latest_published"], "2026-10-15")
         self.assertEqual(ssm.asked, ["/aws/service/bottlerocket/aws-k8s-1.36/x86_64/latest/image_version"])
 
+    def test_records_the_architecture_of_hosts_that_are_not_bottlerocket(self):
+        ec2 = Ec2Stub([("a", "x86_64"), ("w", "arm64"), ("w", "arm64"), ("v", None)],
+                      {"a": (BR.format("1.67.0"), ""), "w": ("al2023-ami-arm", ""), "v": ("al2023-ami", "")})
+        r = ps.node_os(ec2, SsmStub("1.67.0-x"))
+        self.assertEqual((r["other_instances"], r["other_archs"]), (3, ["arm64", None]))  # Bottlerocket's x86_64 is not "other"
+
     def test_versions_compare_numerically_not_as_text(self):
         r = ps.node_os(Ec2Stub(["a"], {"a": (BR.format("1.9.0"), "")}), SsmStub("1.10.0-x"))
         self.assertFalse(r["nodes"][0]["on_latest"])
@@ -493,6 +502,7 @@ class TestNodeOs(unittest.TestCase):
         r = ps.node_os(Ec2Stub(["a"], {}, fail=True), SsmStub("1.67.0"))
         self.assertTrue(r["status"].startswith("failed"))
         self.assertIsNone(r["nodes"])
+        self.assertIsNone(r["other_archs"])
 
     def test_release_renders_and_counts_hosts_behind(self):
         curr = snap(nodes={"status": "ok", "instances_scanned": 4, "package_findings": 0, "kernel_ch": None,

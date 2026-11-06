@@ -42,10 +42,10 @@ class TestMissingLayerData(unittest.TestCase):
 
 class TestCaptureFlags(unittest.TestCase):
     def test_every_failed_capture_is_flagged(self):
-        raw = {n: {"status": "failed: AccessDenied"} for n in ("node_scan", "node_os", "package_breakdown")}
+        raw = {n: {"status": "failed: AccessDenied"} for n in ("node_scan", "node_os", "package_breakdown", "scan_coverage")}
         raw["package_managers_stats"] = {"failed": 3}
         keys = [f["key"] for f in mv.data_quality({}, {"raw": raw}, []) if f["kind"] == "capture_status"]
-        self.assertEqual(keys, ["package_breakdown", "node_scan", "node_os", "package_managers"])
+        self.assertEqual(keys, ["package_breakdown", "node_scan", "node_os", "scan_coverage", "package_managers"])
         self.assertEqual(mv.data_quality({}, {"raw": {"package_managers_stats": {"failed": 0}}}, []), [])
 
 

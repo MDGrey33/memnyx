@@ -28,7 +28,7 @@ import re
 import sys
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from config_util import (
@@ -265,6 +265,34 @@ REBUILD_FLAG_RATIO = 1.5
 REBUILD_FLAG_MIN_GAP = 50
 
 
+class ImageDetailsError(Exception):
+    def __init__(self, repo, err):
+        super().__init__(f"{repo}: {err}")
+        self.repo, self.err = repo, err
+
+
+def image_details(ecr, repos):
+    """{(repo, digest): ECR imageDetail} for every image in the given repos. A repo
+    deleted since Inspector scanned it is skipped: its images get no details. Any
+    other failure raises ImageDetailsError naming the repo."""
+    out = {}
+    for repo in sorted(repos):
+        try:
+            kw = {"repositoryName": repo, "maxResults": 1000}
+            while True:
+                resp = ecr.describe_images(**kw)
+                for d in resp.get("imageDetails", []):
+                    out[(repo, d.get("imageDigest"))] = d
+                if not resp.get("nextToken"):
+                    break
+                kw["nextToken"] = resp["nextToken"]
+        except AWS_ERRORS as e:
+            if _code(e) == "RepositoryNotFoundException":
+                continue
+            raise ImageDetailsError(repo, e) from e
+    return out
+
+
 def _failed(out, what, err):
     code = _code(err)
     print(f"  WARN: rebuild comparison — {what} failed, field left empty: {err}", file=sys.stderr)
@@ -322,21 +350,10 @@ def rebuild_comparison(c, ecr, since, basis=None):
     except AWS_ERRORS as e:
         return _failed(out, "findings per image", e)
     # 3. Push times from ECR, per repo.
-    pushed = {}
-    for repo in sorted({r for r, _ in active.values()}):
-        try:
-            kw = {"repositoryName": repo, "maxResults": 1000}
-            while True:
-                resp = ecr.describe_images(**kw)
-                for d in resp.get("imageDetails", []):
-                    pushed[(repo, d.get("imageDigest"))] = _as_dt(d.get("imagePushedAt"))
-                if not resp.get("nextToken"):
-                    break
-                kw["nextToken"] = resp["nextToken"]
-        except AWS_ERRORS as e:
-            if _code(e) == "RepositoryNotFoundException":
-                continue  # repo deleted since the scan; its images fall to "push time unknown"
-            return _failed(out, f"push times ({repo})", e)
+    try:
+        pushed = {k: _as_dt(d.get("imagePushedAt")) for k, d in image_details(ecr, {r for r, _ in active.values()}).items()}
+    except ImageDetailsError as e:
+        return _failed(out, f"push times ({e.repo})", e.err)
     # 4. Group and compare.
     groups = defaultdict(lambda: {"old": [], "new": []})
     unknown = 0
@@ -364,6 +381,183 @@ def rebuild_comparison(c, ecr, since, basis=None):
     repos.sort(key=lambda r: -r["gap_per_image"])
     tot.update({"inactive_images_excluded": inactive, "push_time_unknown": unknown})
     return {**out, "repos": repos, "not_comparable": not_comparable, "totals": tot}
+
+
+def lambda_client():
+    session = boto3.Session(profile_name=PROFILE, region_name=REGION)
+    return session.client("lambda", config=Config(retries={"mode": "adaptive", "max_attempts": 8}))
+
+
+_WINDOW = re.compile(r"DAYS_(\d+)")
+
+
+def _window(v):
+    """'DAYS_30' → 30 days; 'LIFETIME' → None, meaning never lapses. Anything else raises:
+    an unknown setting must fail the block, not produce a wrong date."""
+    if v == "LIFETIME":
+        return None
+    m = _WINDOW.fullmatch(v or "")
+    if not m:
+        raise ValueError(f"unknown rescan window {v!r}")
+    return timedelta(days=int(m.group(1)))
+
+
+def lapse_at(windows, pushed, last_in_use, last_pulled):
+    """The day Inspector stops rescanning an image: the later of push date + push
+    window and last use + use window. "Use" is the last time Inspector saw it
+    running (mode LAST_IN_USE_AT) or the last pull (LAST_PULL_DATE). Inspector
+    never records a Lambda running an image, so for a container Lambda this is
+    push date + push window. None when the push window is LIFETIME (never lapses)
+    or no date is known."""
+    push_w = _window(windows.get("push"))
+    use_w = _window(windows["use"]) if windows.get("use") is not None else None  # optional in the API
+    if windows.get("push") == "LIFETIME":
+        return None
+    use = last_in_use if windows.get("mode") == "LAST_IN_USE_AT" else last_pulled
+    dates = [d + w for d, w in ((pushed, push_w), (use, use_w)) if d is not None and w is not None]
+    return max(dates) if dates else None
+
+
+def _iso(v):
+    d = _as_dt(v)
+    return d.astimezone(timezone.utc).isoformat() if d else None
+
+
+INDEX_MEDIA_TYPES = {"application/vnd.oci.image.index.v1+json",
+                     "application/vnd.docker.distribution.manifest.list.v2+json"}
+
+
+def _platforms(ecr, repo, digest, media_type):
+    """The platform images under a multi-architecture image index. Pods name the
+    index as in use; Inspector scans only the platform images, which therefore
+    never count as running. Attestation manifests are not platforms."""
+    resp = ecr.batch_get_image(repositoryName=repo, imageIds=[{"imageDigest": digest}],
+                               acceptedMediaTypes=[media_type])
+    images = resp.get("images") or []
+    if not images:
+        raise ValueError(f"index {digest[:19]} not returned")
+    out = []
+    for m in json.loads(images[0].get("imageManifest") or "{}").get("manifests") or []:
+        if (m.get("annotations") or {}).get("vnd.docker.reference.type") == "attestation-manifest":
+            continue
+        pl = m.get("platform") or {}
+        out.append({"digest": m.get("digest"), "platform": "/".join(x for x in (pl.get("os"), pl.get("architecture"),
+                                                                                 pl.get("variant")) if x) or None})
+    return out
+
+
+def _image_ref(uri):
+    """'<acct>.dkr.ecr.<region>.amazonaws.com/<repo>@sha256:<hex>' → (repo, digest)."""
+    path, _, digest = (uri or "").partition("@")
+    repo = path.split("/", 1)[1] if "/" in path else None
+    return (repo, digest) if repo and digest.startswith("sha256:") else (None, None)
+
+
+def _function_row(lam, name, qualifier, images):
+    """One row per image a function serves: its $LATEST, or a published version an
+    alias points at. A read failure costs this row (status UNREAD), not the rest."""
+    label = name if qualifier is None else f"{name}:{qualifier}"
+    try:
+        g = lam.get_function(FunctionName=name, **({"Qualifier": qualifier} if qualifier else {}))
+    except AWS_ERRORS as e:
+        return {"function": label, "repo": None, "digest": None, "last_modified": None,
+                "status": "UNREAD", "reason": _code(e), "lapse_at": None}
+    repo, digest = _image_ref((g.get("Code") or {}).get("ResolvedImageUri"))
+    # Same repo first; then the same digest in any repo Inspector covers it under,
+    # preferring a copy still rescanned (the content is what is scanned), then the
+    # latest lapse, so the listing order never decides.
+    i = next((x for x in images if (x["repo"], x["digest"]) == (repo, digest)), None) \
+        or max((x for x in images if digest and x["digest"] == digest),
+               key=lambda x: (x["status"] == "ACTIVE", x["lapse_at"] or ""), default=None)
+    return {"function": label, "repo": repo, "digest": digest,
+            "last_modified": (g.get("Configuration") or {}).get("LastModified"),
+            # NOT_IN_COVERAGE: Inspector has no record of the image at all.
+            "status": i["status"] if i else "NOT_IN_COVERAGE",
+            "reason": i["reason"] if i else None, "lapse_at": i["lapse_at"] if i else None}
+
+
+def _function_rows(lam, name, images):
+    """$LATEST plus each alias's published version: traffic served through an alias
+    runs that version's image, which can be older than $LATEST's."""
+    rows = [_function_row(lam, name, None, images)]
+    try:
+        versions = sorted({a.get("FunctionVersion") for p in lam.get_paginator("list_aliases").paginate(FunctionName=name)
+                           for a in p.get("Aliases", [])} - {None, "$LATEST"})
+    except AWS_ERRORS as e:
+        return rows + [{"function": f"{name}:aliases", "repo": None, "digest": None, "last_modified": None,
+                        "status": "UNREAD", "reason": _code(e), "lapse_at": None}]
+    seen = {(rows[0]["repo"], rows[0]["digest"])}
+    for v in versions:
+        r = _function_row(lam, name, v, images)
+        if (r["repo"], r["digest"]) not in seen or r["status"] == "UNREAD":  # same image as $LATEST: one row is enough
+            seen.add((r["repo"], r["digest"]))
+            rows.append(r)
+    return rows
+
+
+def scan_coverage(c, ecr, lam):
+    """Every ECR image Inspector knows, with its scan status and the day rescanning
+    lapses, and the image each container Lambda runs.
+
+    Recorded whole so later runs and other tools can reuse it: the lapse date can
+    be recomputed from the stored dates and windows. A failed Lambda read keeps
+    the images and leaves functions None; a failed image read leaves both None.
+    """
+    out = {"status": "ok", "windows": None, "images": None, "functions": None}
+    try:
+        st = (c.get_configuration().get("ecrConfiguration") or {}).get("rescanDurationState") or {}
+        windows = {"push": st.get("rescanDuration"), "use": st.get("pullDateRescanDuration"),
+                   "mode": st.get("pullDateRescanMode")}
+        lapse_at(windows, None, None, None)  # validates both windows before any date is computed
+        out["windows"] = windows
+        cov, kwargs = [], {"filterCriteria": {"resourceType": [{"comparison": "EQUALS", "value": "AWS_ECR_CONTAINER_IMAGE"}]},
+                           "maxResults": 200}
+        while True:
+            resp = c.list_coverage(**kwargs)
+            cov += resp.get("coveredResources", [])
+            if not resp.get("nextToken"):
+                break
+            kwargs["nextToken"] = resp["nextToken"]
+        repos = sorted({((r.get("resourceMetadata") or {}).get("ecrRepository") or {}).get("name") for r in cov} - {None})
+        details = image_details(ecr, repos)
+    except (ValueError, ImageDetailsError, *AWS_ERRORS) as e:
+        code = (_code(e) if isinstance(e, AWS_ERRORS) else
+                f"{e.repo}: {_code(e.err)}" if isinstance(e, ImageDetailsError) else str(e))
+        print(f"  WARN: scan coverage failed — field left empty: {e}", file=sys.stderr)
+        return {**out, "status": f"failed: images: {code}"}
+    images = []
+    for r in cov:
+        meta = r.get("resourceMetadata") or {}
+        repo = (meta.get("ecrRepository") or {}).get("name")
+        digest = (r.get("resourceId") or "").rpartition("/")[2]
+        img = meta.get("ecrImage") or {}
+        d = details.get((repo, digest)) or {}
+        pushed, in_use, pulled = (_as_dt(d.get("imagePushedAt")), _as_dt(img.get("lastInUseAt")),
+                                  _as_dt(d.get("lastRecordedPullTime")))
+        s = r.get("scanStatus") or {}
+        lapse = lapse_at(windows, pushed, in_use, pulled)
+        media = d.get("imageManifestMediaType")
+        platforms = None
+        if media in INDEX_MEDIA_TYPES:
+            try:
+                platforms = _platforms(ecr, repo, digest, media)
+            except (ValueError, *AWS_ERRORS) as e:  # costs this row's platforms, not the block
+                print(f"  WARN: scan coverage — platforms of {repo}@{digest[:19]} not read: {e}", file=sys.stderr)
+        images.append({"index": media in INDEX_MEDIA_TYPES, "platforms": platforms, "repo": repo, "digest": digest, "status": s.get("statusCode"), "reason": s.get("reason"),
+                       "pushed_at": _iso(pushed), "last_in_use_at": _iso(in_use), "in_use_count": img.get("inUseCount"),
+                       "last_pulled_at": _iso(pulled), "last_scanned_at": _iso(r.get("lastScannedAt")),
+                       "lapse_at": _iso(lapse)})
+    images.sort(key=lambda x: (x["repo"] or "", x["digest"]))
+    out["images"] = images
+    try:
+        fns = []
+        for page in lam.get_paginator("list_functions").paginate():
+            fns += [f["FunctionName"] for f in page.get("Functions", []) if f.get("PackageType") == "Image"]
+        out["functions"] = [row for name in sorted(fns) for row in _function_rows(lam, name, images)]
+    except AWS_ERRORS as e:
+        print(f"  WARN: scan coverage — container Lambdas failed, images kept: {e}", file=sys.stderr)
+        out["status"] = f"failed: functions: {_code(e)}"
+    return out
 
 
 def get_title_stats(responses):
@@ -731,12 +925,13 @@ def node_os(ec2, ssm):
     are counted, not read. Never partial: a failure returns status failed.
     """
     try:
-        by_image = defaultdict(int)
+        by_image, arch_of = defaultdict(int), defaultdict(set)
         for page in ec2.get_paginator("describe_instances").paginate(
                 Filters=[{"Name": "instance-state-name", "Values": ["running"]}]):
             for r in page.get("Reservations", []):
                 for i in r.get("Instances", []):
                     by_image[i["ImageId"]] += 1
+                    arch_of[i["ImageId"]].add(i.get("Architecture"))
         images = ec2.describe_images(ImageIds=sorted(by_image))["Images"] if by_image else []
         groups, other = defaultdict(lambda: {"instances": 0, "image_created": None}), sum(by_image.values())
         for im in images:
@@ -750,7 +945,7 @@ def node_os(ec2, ssm):
             g["image_created"] = min(filter(None, [g["image_created"], created]), default=None)
     except AWS_ERRORS as e:
         print(f"  WARN: node OS capture failed — field left empty: {e}", file=sys.stderr)
-        return {"status": f"failed: {_code(e)}", "nodes": None, "other_instances": None}
+        return {"status": f"failed: {_code(e)}", "nodes": None, "other_instances": None, "other_archs": None}
     # Looked up per group: a Kubernetes version or architecture with no
     # published parameter costs that group its comparison, not the others.
     latest = {}
@@ -768,7 +963,13 @@ def node_os(ec2, ssm):
                       "image_created": g["image_created"], "latest": lt["version"] if lt else None,
                       "latest_published": lt["published"].date().isoformat() if lt and lt["published"] else None,
                       "on_latest": _on_latest(version, lt["version"] if lt else None)})
-    return {"status": "ok", "nodes": nodes, "other_instances": other}
+    # Architectures of the hosts that are not Bottlerocket, as EC2 names them
+    # (x86_64, arm64). Without them a running image's platform cannot be matched
+    # to every node; None for an instance EC2 reports no architecture for.
+    bottlerocket = {im["ImageId"] for im in images if BOTTLEROCKET_NAME.search(im.get("Name") or "")}
+    other_archs = sorted({a for img, archs in arch_of.items() if img not in bottlerocket for a in archs},
+                         key=lambda a: (a is None, a or ""))
+    return {"status": "ok", "nodes": nodes, "other_instances": other, "other_archs": other_archs}
 
 
 def _on_latest(running, latest):
@@ -1133,6 +1334,8 @@ def main():
     else:
         print("→ rebuilt vs older images, per repo ...", flush=True)
         rebuild = rebuild_comparison(c, ecr_client(), since, basis)
+    print("→ scan coverage: lapse dates and container Lambdas ...", flush=True)
+    scanning = scan_coverage(c, ecr_client(), lambda_client())
 
     raw = {
         "generated_at":  ts,
@@ -1153,6 +1356,7 @@ def main():
         "package_breakdown": breakdown,
         "node_scan":     nodes,
         "node_os":       os_release,
+        "scan_coverage": scanning,
     }
 
     report = build_report(raw)

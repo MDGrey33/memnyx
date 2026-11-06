@@ -11,6 +11,8 @@ history that predates a metric invents a fall that never happened.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from levers import remediation_levers
 
 # A headline count that rises by at least this percent is flagged for a capture
@@ -359,7 +361,7 @@ def data_quality(prev, curr, counts):
             # is exactly what a rise from zero can mean.
             flags.append({"kind": "outlier", "key": m["key"],
                           "note": f"{m['label']} rose from 0 to {m['curr']}. Verify the previous capture before explaining it."})
-    for name in ("first_seen", "rebuild_comparison", "package_breakdown", "node_scan", "node_os"):
+    for name in ("first_seen", "rebuild_comparison", "package_breakdown", "node_scan", "node_os", "scan_coverage"):
         b = _get(curr, ("raw", name))
         # no_previous_snapshot is the first run, not a capture problem.
         if isinstance(b, dict) and b.get("status") not in ("ok", None, "no_previous_snapshot"):
@@ -373,6 +375,93 @@ def data_quality(prev, curr, counts):
         flags.append({"kind": "inventory", "key": "ecr_covered",
                       "note": f"ECR images covered moved {cov['pct']:+}%. Inventory change: read the decomposition before the totals."})
     return flags
+
+
+# ── running but not scanned ──────────────────────────────────────────────────
+
+# A running image whose rescanning lapses within this many days of the capture
+# is listed before it lapses, so a rebuild can land first.
+LAPSE_SOON_DAYS = 14
+
+
+def _capture_time(snap):
+    """The snapshot's own capture time ('2026-11-06 15:05 UTC'). The panel is
+    measured from it, never from the clock, so a snapshot reads the same later."""
+    try:
+        return datetime.strptime(_get(snap, ("raw", "generated_at")) or "", "%Y-%m-%d %H:%M UTC").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+# Kernel spelling (node_os) → image platform spelling.
+NODE_ARCH = {"x86_64": "amd64", "aarch64": "arm64", "i386": "386"}
+
+
+def _node_archs(snap):
+    """Architectures every running instance uses, or None when any is unknown: node_os
+    failed, a non-Bottlerocket host has no recorded architecture (older snapshots
+    record only a count), or EC2 gave none. None means every platform of a running
+    image index is checked. Fargate pods run on no instance and are not seen here."""
+    n = _get(snap, ("raw", "node_os"))
+    if not isinstance(n, dict) or n.get("status") != "ok" or not isinstance(n.get("nodes"), list):
+        return None
+    others = n.get("other_archs")
+    if n.get("other_instances") and (not isinstance(others, list) or not others or None in others):
+        return None
+    archs = {NODE_ARCH.get(a, a) for a in [x.get("arch") for x in n["nodes"]] + (others or [])}
+    return None if None in archs or not archs else archs
+
+
+def scan_gaps(curr):
+    """Workloads running now on an image Inspector no longer rescans, and those whose
+    rescanning lapses within LAPSE_SOON_DAYS. Running means a container Lambda's
+    current image, or an image Inspector saw in use on the cluster.
+
+    None when the snapshot has no usable scan_coverage block (older snapshots,
+    or the image read failed): absent, never an empty all-clear.
+    """
+    sc, at = _get(curr, ("raw", "scan_coverage")), _capture_time(curr)
+    if not isinstance(sc, dict) or not isinstance(sc.get("images"), list) or at is None:
+        return None
+    soon = at + timedelta(days=LAPSE_SOON_DAYS)
+    running = [{"kind": "lambda", "name": f["function"], "repo": f.get("repo"), "digest": f.get("digest"),
+                "status": f.get("status"), "reason": f.get("reason"), "lapse_at": f.get("lapse_at")}
+               for f in sc.get("functions") or []]
+    by_digest = {(i["repo"], i["digest"]): i for i in sc["images"]}
+    archs = _node_archs(curr)
+    for i in sc["images"]:
+        if not (i.get("in_use_count") or 0) > 0:
+            continue
+        if not i.get("index"):
+            running.append({"kind": "cluster", "name": i["repo"], "repo": i["repo"], "digest": i["digest"],
+                            "status": i.get("status"), "reason": i.get("reason"), "lapse_at": i.get("lapse_at")})
+        elif i.get("platforms") is None:
+            # A running index whose platform images could not be read: unknown, so listed.
+            running.append({"kind": "cluster", "name": i["repo"], "repo": i["repo"], "digest": i["digest"],
+                            "status": "PLATFORMS_UNKNOWN", "reason": None, "lapse_at": None})
+        else:
+            # Pods name the index; Inspector scans the platform images under it and
+            # never sees them run, so each is judged on its own scan status.
+            for pl in i["platforms"]:
+                arch = ((pl.get("platform") or "").split("/") + [None, None])[1]
+                if archs is not None and arch not in archs:
+                    continue  # no node can run this platform
+                c = by_digest.get((i["repo"], pl.get("digest"))) or {}
+                running.append({"kind": "cluster", "name": f"{i['repo']} ({pl.get('platform') or 'unknown platform'})",
+                                "repo": i["repo"], "digest": pl.get("digest"),
+                                "status": c.get("status", "NOT_IN_COVERAGE"), "reason": c.get("reason"),
+                                "lapse_at": c.get("lapse_at")})
+    not_scanned, lapsing = [], []
+    for r in running:
+        if r["status"] != "ACTIVE":
+            not_scanned.append(r)
+        elif r["lapse_at"] and datetime.fromisoformat(r["lapse_at"]) <= soon:
+            lapsing.append(r)
+    lapsing.sort(key=lambda r: (r["lapse_at"], r["name"]))
+    not_scanned.sort(key=lambda r: (r["kind"], r["name"]))
+    return {"as_of": at.isoformat(), "soon_days": LAPSE_SOON_DAYS, "windows": sc.get("windows"),
+            "running": len(running), "functions_measured": isinstance(sc.get("functions"), list),
+            "not_scanned": not_scanned, "lapsing": lapsing}
 
 
 # ── composed entry point ─────────────────────────────────────────────────────
@@ -391,4 +480,5 @@ def security_movement(prev, curr, prev_date=None, curr_date=None, limit=DEFAULT_
         "correlation": correlation_movement(prev, curr),
         "data_quality": data_quality(prev, curr, counts),
         "levers": remediation_levers(curr, _merged_managers(prev, curr), KERNEL_PACKAGES, APPLICATION_MANAGERS),
+        "scan_gaps": scan_gaps(curr),
     }

@@ -165,6 +165,14 @@ env var isn't set in your shell, pass `--reports-dir "$REPORTS_DIR"` explicitly.
 
 Watch for errors. If it exits non-zero, show the last 20 lines of output and stop.
 
+It also records `scan_coverage`: every ECR image's scan status, the dates its rescanning
+depends on, the day that rescanning lapses, the platform images under each multi-architecture
+image, the image each container Lambda runs (its `$LATEST` and every version an alias points
+at), and, in `node_os`, the architecture of every running host. That needs
+`inspector2:GetConfiguration`, `ecr:DescribeImages`, `ecr:BatchGetImage`, `lambda:ListFunctions`,
+`lambda:GetFunction` and `lambda:ListAliases`; a refusal costs that block, or one function's row,
+never the snapshot.
+
 ---
 
 ## Step 3 — GitHub security snapshot (~2 min)
@@ -202,9 +210,20 @@ Its **What moved** tab shows each snapshot against the previous one and against 
 30-day basis, computed by the same code as Step 6's `movement.md`. Fixed panels, the same
 every snapshot: a verdict with a trend line and plain-language warnings, the waterfall by
 fixing action, What to fix next (the remediation levers with links to GitHub and
-Inspector) and the repo movers. Between them, **Why it moved** is the note from Step 6,
+Inspector), Running but not scanned, and the repo movers. Between them, **Why it moved** is the note from Step 6,
 drawn from the blocks you chose. The newest snapshot carries all of it; older ones carry
-the verdict, the waterfall and the note. `trend_start` in config sets where the trend line begins. The page's JavaScript lives
+the verdict, the waterfall and the note.
+
+**Running but not scanned** lists workloads running now on an image Inspector no longer
+rescans, and those whose rescanning lapses within 14 days of the capture. The lapse date is
+the later of push date + push window and last use + use window, both windows read live from
+Inspector; "use" is last seen running on the cluster, or last pull when the account rescans by
+pull date. In the running mode two cases lapse while running. Inspector never counts a Lambda as
+using its image, so a container Lambda lapses one push window after its image was pushed. And
+pods name a multi-architecture image by its index, which Inspector cannot scan, while the
+platform images it does scan never count as running; the panel judges such an image by the
+platforms the cluster's hosts run, or by all of them when any host's architecture is unknown.
+It does not see images pulled from outside this account's ECR, or Fargate pods. `trend_start` in config sets where the trend line begins. The page's JavaScript lives
 in `scripts/dashboard/` and is inlined at build, so the page stays one file.
 
 ---

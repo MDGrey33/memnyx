@@ -513,6 +513,33 @@ def _levers(mv):
             for x in lv["levers"]]
 
 
+def _days(window):
+    m = re.fullmatch(r"DAYS_(\d+)", window or "")
+    return int(m.group(1)) if m else None
+
+
+def _gap_row(r):
+    return {"kind": "Lambda" if r["kind"] == "lambda" else "Cluster", "name": r["name"],
+            "image": (f"{r['repo']}@{(r.get('digest') or '').removeprefix('sha256:')[:12]}" if r.get("repo") else "–"),
+            "why": "Inspector has no record of this image" if r.get("status") == "NOT_IN_COVERAGE"
+                   else "multi-architecture image; its platform images could not be read"
+                   if r.get("status") == "PLATFORMS_UNKNOWN"
+                   else f"could not be read ({r.get('reason')})" if r.get("status") == "UNREAD"
+                   else "rescanning lapsed" if r.get("reason") == "SCAN_ELIGIBILITY_EXPIRED"
+                   else (r.get("reason") or r.get("status") or "").replace("_", " ").lower(),
+            "lapse": (r.get("lapse_at") or "")[:10] or None}
+
+
+def _scan_gaps(mv):
+    g = mv.get("scan_gaps")
+    if not isinstance(g, dict):
+        return None
+    w = g.get("windows") or {}
+    return {"running": g["running"], "soon_days": g["soon_days"], "functions_measured": g["functions_measured"],
+            "push_days": _days(w.get("push")), "use_days": _days(w.get("use")), "mode": w.get("mode"),
+            "not_scanned": [_gap_row(r) for r in g["not_scanned"]], "lapsing": [_gap_row(r) for r in g["lapsing"]]}
+
+
 def page_view(mv, detail, note_md="", allow=None):
     """The page-shaped comparison. "headline" carries the verdict, warnings,
     waterfall and note; "full" adds the levers and the repo movers."""
@@ -523,7 +550,7 @@ def page_view(mv, detail, note_md="", allow=None):
     view = {"verdict": _verdict(mv), "warnings": warnings_view(mv), "waterfall": _waterfall(mv), "note": note}
     if detail == "full":
         movers = mv.get("movers") or {}
-        view.update({"levers": _levers(mv),
+        view.update({"levers": _levers(mv), "scan_gaps": _scan_gaps(mv),
                      "repos": [{"repo": r["repo"], "delta": r["delta"]} for r in movers.get("repos") or []]})
     return view
 

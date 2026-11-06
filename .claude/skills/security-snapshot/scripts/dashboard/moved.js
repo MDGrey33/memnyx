@@ -159,6 +159,39 @@ function mvLevers(levers) {
     }).join('')}</div></div>`;
 }
 
+// Running workloads Inspector no longer rescans, and those about to lapse. The
+// state is in data-gaps so tests key on structure, not on wording.
+function mvGapRow(r, lapseLabel) {
+  return `<div class="mv-item"><div><div class="mv-item-n">${esc(r.name)} <span class="mv-owner">${esc(r.kind)}</span></div>
+    <div class="mv-item-d"><code>${esc(r.image)}</code> · ${esc(r.why)}</div></div>
+    <div class="mv-num" data-lapse>${r.lapse ? esc(lapseLabel) + ' ' + esc(r.lapse) : 'no date'}</div><div class="mv-acts"></div></div>`;
+}
+
+function mvScanGaps(g) {
+  if (!g) return '';
+  // A null window is LIFETIME (push) or not set (use).
+  const push = g.push_days == null ? 'for as long as it exists after it is pushed' : `for ${esc(g.push_days)} days after it is pushed`;
+  const use = g.use_days == null ? '' : g.mode === 'LAST_IN_USE_AT'
+    ? `, or ${esc(g.use_days)} days after it was last seen running on the cluster, whichever is later`
+    : `, or ${esc(g.use_days)} days after it was last pulled, whichever is later`;
+  const lambda = g.mode === 'LAST_IN_USE_AT' && g.push_days != null
+    ? ` A Lambda running an image does not count as use, so a container Lambda stops being rescanned ${esc(g.push_days)} days after its image was pushed.` : '';
+  const rule = `Inspector rescans an image ${push}${use}.${lambda} After that, new CVEs never reach it. Images from outside this account's ECR, and Fargate pods, are not checked.`;
+  const state = g.not_scanned.length ? 'gaps' : g.lapsing.length ? 'lapsing' : 'clear';
+  const notScanned = g.not_scanned.length
+    ? `<h4 class="mv-chart-title">Running, not rescanned (${mvN(g.not_scanned.length)})</h4><div class="mv-list">${g.not_scanned.map(r => mvGapRow(r, 'lapsed')).join('')}</div>`
+    : '';
+  const lapsing = g.lapsing.length
+    ? `<h4 class="mv-chart-title">Rescanning lapses within ${esc(g.soon_days)} days (${mvN(g.lapsing.length)})</h4><div class="mv-list">${g.lapsing.map(r => mvGapRow(r, 'lapses')).join('')}</div>`
+    : '';
+  const clear = state === 'clear'
+    ? `<p class="mv-meta">All ${mvN(g.running)} running ${g.functions_measured ? 'images Inspector tracks' : 'cluster images Inspector tracks'} are being rescanned, and none lapses within ${esc(g.soon_days)} days.</p>` : '';
+  const partial = g.functions_measured ? '' : '<p class="mv-meta">Container Lambdas could not be read this run, so only cluster images are checked.</p>';
+  return `<div class="mv-sec" data-gaps="${state}"><h2>Running but not scanned</h2>
+    <p class="mv-sec-lede">${rule}</p>
+    <div class="card">${notScanned}${lapsing}${clear}${partial}</div></div>`;
+}
+
 function mvRepoMovers(repos) {
   if (!repos || !repos.length) return '';
   return `<div class="mv-sec"><h2>Biggest moves by repo</h2>
@@ -198,7 +231,7 @@ function movedPanelHtml(date, basis) {
         <div class="mv-sub">${mvN(v.waterfall.start)} → ${mvN(v.waterfall.end)}, all resource types. A finding that names two packages counts in both, so this runs above the finding count.</div>
         <div style="height:240px"><canvas id="mvWaterfall"></canvas></div></div>` : ''}
       ${mvNote(v.note)}</div>` +
-    mvLevers(v.levers) + mvRepoMovers(v.repos);
+    mvLevers(v.levers) + mvScanGaps(v.scan_gaps) + mvRepoMovers(v.repos);
 }
 
 // ── Charts: built only while the tab is visible (a hidden canvas has no size) ──

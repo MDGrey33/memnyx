@@ -72,7 +72,7 @@ class TestBuiltPageWhatMoved(unittest.TestCase):
         (e,) = moved["20261007"]
         self.assertEqual((e["basis"], e["kind"], e["detail"], e["file"]), ("20260923", "previous", "full", "movement.md"))
         v = e["view"]
-        self.assertEqual(sorted(v), ["levers", "note", "repos", "verdict", "warnings", "waterfall"])
+        self.assertEqual(sorted(v), ["levers", "note", "repos", "scan_gaps", "verdict", "warnings", "waterfall"])
         self.assertEqual(v["note"]["lead"], "Retention &lt;b&gt;tightened&lt;/b&gt;.")
         stat, prose = v["note"]["blocks"]
         self.assertEqual((stat["type"], stat["value"], stat["tone"]), ("stat", "−5k", "fix"))
@@ -205,7 +205,7 @@ class TestVerdictAndWaterfall(unittest.TestCase):
     def test_headline_detail_leaves_out_the_full_sections(self):
         self.assertEqual(sorted(mp.page_view(mv_fixture(), "headline")), ["note", "verdict", "warnings", "waterfall"])
         self.assertEqual(sorted(mp.page_view(mv_fixture(), "full")),
-                         ["levers", "note", "repos", "verdict", "warnings", "waterfall"])
+                         ["levers", "note", "repos", "scan_gaps", "verdict", "warnings", "waterfall"])
 
     def test_a_note_the_parser_cannot_read_costs_only_the_note(self):
         with mock.patch.object(mp, "note_view", side_effect=RuntimeError("parser fault")):
