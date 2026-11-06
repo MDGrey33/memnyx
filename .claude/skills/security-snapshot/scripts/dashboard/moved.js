@@ -150,7 +150,7 @@ function mvLevers(levers) {
       return `<div class="card mv-lever">
         <div class="mv-lever-head"><div class="mv-rank">${i + 1}</div><div><h3>${esc(l.title)}</h3><span class="mv-owner">${esc(l.owner)}</span></div></div>
         <div class="mv-impact"><div class="mv-pct">${esc(l.share)}%</div><div class="mv-bar"><i style="width:${width}%"></i></div>
-          <div class="mv-abs">${mvN(l.removes)} critical + high</div></div>
+          <div class="mv-abs">${mvN(l.removes)} critical + high${l.running == null ? '' : ` · <span data-running>${mvN(l.running)} on running images</span>`}</div></div>
         <div class="mv-how">${esc(l.how)}</div>
         <div class="mv-list">${items.slice(0, 4).join('')}</div>
         ${items.length > 4 ? `<details><summary>${items.length - 4} more</summary><div class="mv-list mv-list-more">${items.slice(4).join('')}</div></details>` : ''}

@@ -192,24 +192,29 @@ def _levers(mv):
         return "\n".join(lines + [f"Not available: {why}"] + _hosts(lv))
     lines.append(f"Current stock, not movement: what each change removes from today's critical + high "
                  f"({_n(lv['total_ch'])}). Levers can overlap where a package sits in a listed layer; the "
-                 f"base-layer figures already exclude the kernel-header and bundled-runtime findings.\n")
+                 f"base-layer figures already exclude the kernel-header and bundled-runtime findings. Running counts "
+                 f"the findings on images in use when Inspector last checked; the rest close when their images age out "
+                 f"of rescanning. A dash means not measured. A finding that names two bundled packages counts under both, in "
+                 f"Removes and in Running.\n")
     if lv.get("breakdown_status") not in (None, "ok"):
         lines.append(f"_Per-repo breakdown {lv['breakdown_status']}: kernel-header and bundled-runtime levers omitted, "
                      f"and base-layer counts include their findings._\n")
-    lines.append(_table(["Lever", "Removes", "Share", "Who", "How"],
-                        [[l["title"], _n(l["removes_ch"]), _pct(l["share_pct"]).lstrip("+"), l["owner"], l["action"]]
-                         for l in lv["levers"]]))
+    lines.append(_table(["Lever", "Removes", "Running", "Share", "Who", "How"],
+                        [[l["title"], _n(l["removes_ch"]), _n(l.get("running_ch")), _pct(l["share_pct"]).lstrip("+"),
+                          l["owner"], l["action"]] for l in lv["levers"]]))
     for l in lv["levers"]:
         if not l["rows"]:
             continue
         lines.append(f"\n### {l['title']}\n")
         if l["key"] == "kernel_headers":
-            lines.append(_table(["Repository", "Critical + high", "Images", "OS", "Header versions", "Fixed version exists"],
-                                [[r["repo"], _n(r["ch"]), r["images"], ", ".join(r["platforms"]), ", ".join(r["versions"]),
-                                  _pct(r["fix_pct"]).lstrip("+")] for r in l["rows"]]))
+            lines.append(_table(["Repository", "Critical + high", "Running", "Images", "OS", "Header versions",
+                                 "Fixed version exists"],
+                                [[r["repo"], _n(r["ch"]), _n(r.get("running_ch")), r["images"], ", ".join(r["platforms"]),
+                                  ", ".join(r["versions"]), _pct(r["fix_pct"]).lstrip("+")] for r in l["rows"]]))
         elif l["key"] == "bundled_runtimes":
-            lines.append(_table(["Package", "Critical + high", "Repos", "Fixed version exists"],
-                                [[r["package"], _n(r["ch"]), ", ".join(r["repos"][:5]) + (" …" if len(r["repos"]) > 5 else ""),
+            lines.append(_table(["Package", "Critical + high", "Running", "Repos", "Fixed version exists"],
+                                [[r["package"], _n(r["ch"]), _n(r.get("running_ch")),
+                                  ", ".join(r["repos"][:5]) + (" …" if len(r["repos"]) > 5 else ""),
                                   _pct(r["fix_pct"]).lstrip("+")] for r in l["rows"]]))
         elif l["key"] == "base_layers":
             if not l["net_of_other_levers"]:

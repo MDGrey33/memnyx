@@ -88,18 +88,26 @@ def _kernel_records(curr, rows, kernel_packages):
             best[r["repo"]] = r
     return [{"repo": repo, "ch": r["ch"], "fix_available": r["fix_available"], "images": r["images"],
              "platforms": list(r.get("platforms") or []), "versions": list(r.get("versions") or []),
-             "layers": list(r.get("layers") or [])} for repo, r in best.items()]
+             "layers": list(r.get("layers") or []), "running_ch": r.get("running_ch"),
+             "running_images": r.get("running_images")} for repo, r in best.items()]
+
+
+def _running_total(rows):
+    """Critical + high on images in use, or None when any row predates the
+    in-use capture: a partial sum would read as a measured figure."""
+    vals = [r.get("running_ch") for r in rows]
+    return None if any(v is None for v in vals) else sum(vals)
 
 
 def kernel_headers(kernel_repos):
     """Per repo: findings, images, OS, header versions, share with a fixed version."""
-    out = sorted(({k: x[k] for k in ("repo", "ch", "fix_available", "images", "platforms", "versions")}
-                  for x in kernel_repos), key=lambda x: (-x["ch"], x["repo"]))
+    out = sorted(({**{k: x[k] for k in ("repo", "ch", "fix_available", "images", "platforms", "versions")},
+                   "running_ch": x.get("running_ch")} for x in kernel_repos), key=lambda x: (-x["ch"], x["repo"]))
     for x in out:
         x["fix_pct"] = _pct(x["fix_available"], x["ch"])
     total = sum(x["ch"] for x in out)
     return _lever("kernel_headers", total, out[:ROWS_SHOWN], repos=len(out),
-                  fix_pct=_pct(sum(x["fix_available"] for x in out), total))
+                  fix_pct=_pct(sum(x["fix_available"] for x in out), total), running_ch=_running_total(out))
 
 
 def bundled_runtimes(rows, kernel_packages):
@@ -108,17 +116,20 @@ def bundled_runtimes(rows, kernel_packages):
     for r in rows:
         if r["package"] in kernel_packages:
             continue
-        x = by_pkg.setdefault(r["package"], {"package": r["package"], "ch": 0, "fix_available": 0, "repos": []})
+        x = by_pkg.setdefault(r["package"], {"package": r["package"], "ch": 0, "fix_available": 0, "repos": [],
+                                             "parts": []})
         x["ch"] += r["ch"]
         x["fix_available"] += r["fix_available"]
         x["repos"].append(r["repo"])
+        x["parts"].append(r)
     out = sorted(by_pkg.values(), key=lambda x: (-x["ch"], x["package"]))
     for x in out:
         x["repos"] = sorted(set(x["repos"]))
         x["fix_pct"] = _pct(x["fix_available"], x["ch"])
+        x["running_ch"] = _running_total(x.pop("parts"))
     total = sum(x["ch"] for x in out)
     return _lever("bundled_runtimes", total, out[:ROWS_SHOWN],
-                  fix_pct=_pct(sum(x["fix_available"] for x in out), total))
+                  fix_pct=_pct(sum(x["fix_available"] for x in out), total), running_ch=_running_total(out))
 
 
 def base_layers(curr, rows, kernel_repos=None, kernel_packages=()):
@@ -214,6 +225,8 @@ def remediation_levers(curr, managers, kernel_packages, application_managers):
     levers += [base_layers(curr, rows, kernel, kernel_packages),
                dependabot_dependencies(curr, managers, application_managers)]
     levers = [l for l in levers if l is not None]
+    for l in levers:
+        l.setdefault("running_ch", None)  # base layers and Dependabot: not measured per image
     levers.sort(key=lambda l: -l["removes_ch"])
     total = _get(curr, "raw", "account_totals")
     total_ch = None

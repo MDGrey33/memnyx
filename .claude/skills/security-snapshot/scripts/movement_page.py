@@ -508,7 +508,7 @@ def _levers(mv):
     if not isinstance(lv, dict) or not lv.get("levers"):
         return None
     return [{"key": x["key"], "title": x["title"], "owner": x["owner"][:1].upper() + x["owner"][1:],
-             "how": x["action"], "removes": x["removes_ch"], "share": x["share_pct"],
+             "how": x["action"], "removes": x["removes_ch"], "running": x.get("running_ch"), "share": x["share_pct"],
              "items": _lever_items(x), "more": max(len(x.get("rows") or []) - LEVER_ITEMS, 0)}
             for x in lv["levers"]]
 

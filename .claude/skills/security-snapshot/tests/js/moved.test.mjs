@@ -22,7 +22,7 @@ const view = (o = {}) => ({
     { type: 'callout', title: 'Coverage gap', tone: 'gap', html: '<p>CALLOUT-BODY</p>' },
     { type: 'error', message: "stat block: 'value' must be text" }] },
   levers: [
-    { key: 'kernel_headers', title: 'Remove kernel headers', owner: 'Service team', how: 'Use slim.', removes: 9788, share: 40.5, more: 0,
+    { key: 'kernel_headers', title: 'Remove kernel headers', owner: 'Service team', how: 'Use slim.', removes: 9788, running: 416, share: 40.5, more: 0,
       items: [{ kind: 'repo', name: 'ns-1/svc-03', ch: 3904, detail: 'Ubuntu 22.04' },
               { kind: 'repo', name: 'ns-1/a', ch: 3 }, { kind: 'repo', name: 'ns-1/b', ch: 2 },
               { kind: 'repo', name: 'ns-1/c', ch: 1 }, { kind: 'repo', name: 'ns-1/d', ch: 1 }] },
@@ -217,6 +217,14 @@ test('levers rank, show their share and give each item its actions', () => {
   const at = h.indexOf('24cced70ec2b'), layer = h.slice(at, h.indexOf('</div></div>', h.indexOf('mv-acts', at)));
   assert.match(layer, /Inspector/);
   assert.doesNotMatch(layer, /data-copy|GitHub/);   // a layer has no repo and no name to paste
+});
+
+test('a lever says how much sits on running images, and only when that was measured', () => {
+  const h = html(page().run);
+  const kernel = h.slice(h.indexOf('Remove kernel headers'), h.indexOf('Merge Dependabot'));
+  assert.match(kernel, /9,788 critical \+ high · <span data-running>416 on running images<\/span>/);
+  const dep = h.slice(h.indexOf('Merge Dependabot'), h.indexOf('Refresh base'));
+  assert.doesNotMatch(dep, /data-running/);
 });
 
 test('the Inspector link falls back to the console start page without a region', () => {

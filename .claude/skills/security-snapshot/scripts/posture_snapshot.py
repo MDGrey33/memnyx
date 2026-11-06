@@ -521,7 +521,10 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS, kernel_na
 
     A row's `layers` is the base-layer netting basis, so it leaves out findings
     that also name a kernel package: those are netted once, through the kernel
-    record.
+    record. Inspector leaves the in-use fields off an image it has never seen
+    running, so a missing count reads as not running. When no finding in the
+    capture carries one, in-use tracking is not reporting, and every
+    `running_ch` is None rather than a zero nobody measured.
 
     Kernel headers and bundled runtimes are fixed per Dockerfile, so the
     remediation question is "which repos", which the per-package aggregation
@@ -561,7 +564,7 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS, kernel_na
     except AWS_ERRORS as e:
         print(f"  WARN: package breakdown failed — field left empty: {e}", file=sys.stderr)
         return {**out, "status": f"failed: {_code(e)}", "rows": None, "kernel_repos": None}
-    acc, kernel = {}, {}
+    acc, kernel, tracked = {}, {}, False
     for found in results:
         for name, f in found:
                 vp = next((v for v in (f.get("packageVulnerabilityDetails") or {}).get("vulnerablePackages") or []
@@ -572,8 +575,14 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS, kernel_na
                 img = (res.get("details") or {}).get("awsEcrContainerImage") or {}
                 repo = img.get("repositoryName") or "unknown"
                 r = acc.setdefault((name, repo), {"ch": 0, "fix_available": 0, "images": set(), "platforms": set(),
-                                                  "versions": set(), "layers": defaultdict(int)})
+                                                  "versions": set(), "layers": defaultdict(int),
+                                                  "running_ch": 0, "running_images": set()})
                 r["ch"] += 1
+                running = _running(img)
+                tracked |= running is not None
+                if running:
+                    r["running_ch"] += 1
+                    r["running_images"].add(res.get("id"))
                 r["fix_available"] += f.get("fixAvailable") == "YES"
                 r["images"].add(res.get("id"))
                 if img.get("platform"):
@@ -589,10 +598,23 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS, kernel_na
                     _kernel_finding(kernel, repo, f, res, img, kernel_names)
     rows = [{"package": k[0], "repo": k[1], "ch": v["ch"], "fix_available": v["fix_available"],
              "images": len(v["images"]), "platforms": sorted(v["platforms"]), "versions": sorted(v["versions"]),
-             "layers": [{"layer": h, "ch": n} for h, n in sorted(v["layers"].items(), key=lambda kv: -kv[1])]}
+             "layers": [{"layer": h, "ch": n} for h, n in sorted(v["layers"].items(), key=lambda kv: -kv[1])],
+             "running_ch": v["running_ch"] if tracked else None,
+             "running_images": len(v["running_images"]) if tracked else None}
             for k, v in acc.items()]
     rows.sort(key=lambda r: (-r["ch"], r["package"], r["repo"]))
-    return {**out, "rows": rows, "kernel_repos": None if kernel_names is None else _kernel_repos(kernel)}
+    return {**out, "rows": rows, "kernel_repos": None if kernel_names is None else _kernel_repos(kernel, tracked)}
+
+
+def _running(img):
+    """Whether Inspector saw the image in use (running in a cluster) when it last
+    checked. An image no longer in use keeps its findings until it ages out of the
+    rescan window, so counts that ignore this overstate what is exposed now.
+    None when the image carries no in-use count, which Inspector does for an
+    image it has never seen running; the caller decides what that means."""
+    if img.get("inUseCount") is None:
+        return None
+    return img["inUseCount"] > 0
 
 
 def _finding_key(f, res):
@@ -608,11 +630,15 @@ def _kernel_finding(kernel, repo, f, res, img, kernel_names):
     records it and later ones are skipped. Versions and layers come from all of
     the finding's kernel entries, not only the queried package's."""
     k = kernel.setdefault(repo, {"findings": set(), "fix_available": 0, "images": set(), "platforms": set(),
-                                 "versions": set(), "layers": defaultdict(int)})
+                                 "versions": set(), "layers": defaultdict(int),
+                                 "running": set(), "running_images": set()})
     key = _finding_key(f, res)
     if key in k["findings"]:
         return
     k["findings"].add(key)
+    if _running(img):
+        k["running"].add(key)
+        k["running_images"].add(res.get("id"))
     k["fix_available"] += f.get("fixAvailable") == "YES"
     k["images"].add(res.get("id"))
     if img.get("platform"):
@@ -624,10 +650,12 @@ def _kernel_finding(kernel, repo, f, res, img, kernel_names):
         k["layers"][layer] += 1
 
 
-def _kernel_repos(kernel):
+def _kernel_repos(kernel, tracked=True):
     out = [{"repo": repo, "ch": len(k["findings"]), "fix_available": k["fix_available"], "images": len(k["images"]),
             "platforms": sorted(k["platforms"]), "versions": sorted(k["versions"]),
-            "layers": [{"layer": h, "ch": n} for h, n in sorted(k["layers"].items(), key=lambda kv: -kv[1])]}
+            "layers": [{"layer": h, "ch": n} for h, n in sorted(k["layers"].items(), key=lambda kv: -kv[1])],
+            "running_ch": len(k["running"]) if tracked else None,
+            "running_images": len(k["running_images"]) if tracked else None}
            for repo, k in kernel.items()]
     return sorted(out, key=lambda x: (-x["ch"], x["repo"]))
 

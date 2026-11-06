@@ -231,6 +231,13 @@ class TestLevers(unittest.TestCase):
         self.assertFalse(lv["bundled_runtimes"]["items"][0]["dependabot"])
         self.assertEqual(lv["base_layers"]["items"][0]["name"], "ab" * 6)
 
+    def test_levers_carry_their_running_count(self):
+        mv = mv_fixture()
+        mv["levers"]["levers"][0]["running_ch"] = 416
+        lv = {x["key"]: x for x in mp.page_view(mv, "full")["levers"]}
+        self.assertEqual(lv["kernel_headers"]["running"], 416)
+        self.assertIsNone(lv["dependabot_dependencies"]["running"])
+
     def test_dependabot_rows_say_what_github_sees(self):
         mv = mv_fixture()
         mv["levers"]["levers"][1]["rows"] = [{"package": "axios", "ch": 90, "manager": "NODE", "gh_ch": 216, "gh_repos": 22},

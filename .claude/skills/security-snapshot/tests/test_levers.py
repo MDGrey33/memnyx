@@ -134,6 +134,36 @@ class TestDependabotLever(unittest.TestCase):
         self.assertIn("| tar | 50 | – | – | NODE |", md)
 
 
+class TestRunning(unittest.TestCase):
+    def test_levers_carry_running_totals_and_say_not_measured_otherwise(self):
+        s = snap([brow("linux", "ns/a", 300), brow("openssl/openssl", "ns/a", 70), brow("openssl/openssl", "ns/b", 30)],
+                 layers=[layer("L9", 0, 50, ["ns/a", "ns/b"])])
+        rows = s["raw"]["package_breakdown"]["rows"]
+        rows[1]["running_ch"], rows[2]["running_ch"] = 70, 0
+        s["raw"]["package_breakdown"]["kernel_repos"] = [
+            {"repo": "ns/a", "ch": 300, "fix_available": 300, "images": 3, "platforms": [], "versions": [],
+             "layers": [], "running_ch": 40}]
+        r = levers_of(s)
+        self.assertEqual(by_key(r, "kernel_headers")["running_ch"], 40)
+        self.assertEqual(by_key(r, "kernel_headers")["rows"][0]["running_ch"], 40)
+        b = by_key(r, "bundled_runtimes")
+        self.assertEqual((b["running_ch"], b["rows"][0]["running_ch"]), (70, 70))
+        self.assertIsNone(by_key(r, "base_layers")["running_ch"])  # not measured, never zero
+        md = render_movement_markdown(mv.security_movement(s, s))
+        self.assertIn("| Remove kernel headers from runtime images | 300 | 40 |", md)
+        self.assertIn("| Refresh shared base images | 50 | – |", md)
+        self.assertIn("| ns/a | 300 | 40 | 3 |", md)
+        self.assertIn("| openssl/openssl | 100 | 70 |", md)
+
+    def test_a_measured_empty_lever_runs_nothing_rather_than_unknown(self):
+        self.assertEqual(lv.kernel_headers([])["running_ch"], 0)
+
+    def test_a_row_from_before_the_running_capture_makes_the_total_unknown(self):
+        s = snap([brow("openssl/openssl", "ns/a", 70), brow("openssl/openssl", "ns/b", 30)])
+        s["raw"]["package_breakdown"]["rows"][0]["running_ch"] = 70
+        self.assertIsNone(by_key(levers_of(s), "bundled_runtimes")["running_ch"])
+
+
 class TestComposition(unittest.TestCase):
     def test_levers_sorted_by_findings_removed_with_share(self):
         s = snap([brow("linux", "ns/a", 100), brow("openssl/openssl", "ns/a", 400)])
@@ -192,9 +222,10 @@ class TestRendering(unittest.TestCase):
 
 # ── captures ─────────────────────────────────────────────────────────────────
 
-def finding(pkg, repo, image, fix="YES", version="6.1.1", layer="L1", platform="DEBIAN_12", others=(), arn=None):
+def finding(pkg, repo, image, fix="YES", version="6.1.1", layer="L1", platform="DEBIAN_12", others=(), arn=None,
+            in_use=None):
     vps = [{"name": o} for o in others] + [{"name": pkg, "version": version, "sourceLayerHash": layer}]
-    img = {"repositoryName": repo, "platform": platform}
+    img = {"repositoryName": repo, "platform": platform, **({} if in_use is None else {"inUseCount": in_use})}
     return {**({"findingArn": arn} if arn else {}),
             "fixAvailable": fix, "packageVulnerabilityDetails": {"vulnerablePackages": vps},
             "resources": [{"id": image, "details": {"awsEcrContainerImage": img}}]}
@@ -301,6 +332,33 @@ class TestPackageBreakdown(unittest.TestCase):
         curr = {"raw": {"package_breakdown": {"status": "ok", "rows": rows}}}
         k = lv._kernel_records(curr, rows, self.K)
         self.assertEqual([(x["repo"], x["ch"]) for x in k], [("ns/a", 5)])
+
+    def test_running_counts_only_images_in_use(self):
+        # An image no longer in use keeps its findings until it ages out of rescanning: the
+        # running count is what is exposed now.
+        live = finding("linux-libc-dev", "ns/a", "i1", others=("linux",), arn="arn:1", in_use=2)
+        idle = finding("linux-libc-dev", "ns/a", "i2", others=("linux",), arn="arn:2", in_use=0)
+        r = self._kernel({("linux", "ns/a"): [live, idle], ("linux-libc-dev", "ns/a"): [live, idle]})
+        self.assertEqual({(x["package"], x["ch"], x["running_ch"], x["running_images"]) for x in r["rows"]},
+                         {("linux", 2, 1, 1), ("linux-libc-dev", 2, 1, 1)})
+        k = r["kernel_repos"][0]
+        self.assertEqual((k["ch"], k["running_ch"], k["running_images"]), (2, 1, 1))
+
+    def test_an_image_never_seen_running_counts_as_not_running(self):
+        # Inspector leaves the in-use fields off an image it has never seen running.
+        never = finding("linux-libc-dev", "ns/a", "i1", others=("linux",), arn="arn:1")
+        live = finding("linux-libc-dev", "ns/a", "i2", others=("linux",), arn="arn:2", in_use=1)
+        r = self._kernel({("linux", "ns/a"): [never, live], ("linux-libc-dev", "ns/a"): [never, live]})
+        self.assertEqual({x["running_ch"] for x in r["rows"]}, {1})
+        self.assertEqual(r["kernel_repos"][0]["running_ch"], 1)
+
+    def test_no_in_use_count_anywhere_is_not_measured_not_zero(self):
+        f = finding("linux-libc-dev", "ns/a", "i1", others=("linux",), arn="arn:1")
+        g = finding("linux-libc-dev", "ns/a", "i2", others=("linux",), arn="arn:2")
+        r = self._kernel({("linux", "ns/a"): [f, g], ("linux-libc-dev", "ns/a"): [f, g]})
+        self.assertEqual({x["running_ch"] for x in r["rows"]}, {None})
+        self.assertIsNone(r["kernel_repos"][0]["running_ch"])
+        self.assertIsNone(lv.kernel_headers(r["kernel_repos"])["running_ch"])
 
     def test_without_kernel_names_there_is_no_kernel_record(self):
         f = finding("linux", "ns/a", "i1", arn="arn:1")
