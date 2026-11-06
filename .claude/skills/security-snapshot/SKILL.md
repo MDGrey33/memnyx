@@ -282,6 +282,12 @@ retention swaps rebuilt images in. Thousands of findings landing on unchanged im
 in one day is a vulnerability feed catching up. Rebuilt images scoring worse than
 older ones in the same repo, on the same day, is a build regression.
 
+**Read the Running column before calling a lever today's exposure.** Inspector keeps
+rescanning an image for its rescan window after the image was last used, so a lever's
+total includes images nothing runs any more. The Running figure is what is exposed now;
+the rest closes as those images age out, or as soon as their digests are deleted. A
+dash means in-use data was not captured, not that nothing runs.
+
 **A GitHub rise needs the same care.** Alerts created on one day across many repos, on
 lockfiles that did not change, are new advisories, not new code. Separate dependencies
 that ship from dev-only ones before calling a critical rise material.
