@@ -13,6 +13,15 @@ args: |
 
 Owns workspace lifecycle: `init` (first-time setup), `add-project` (register a project), and `sync` (update from source).
 
+## Model Selection
+
+See `.claude/skills/_shared/MODEL_SELECTION.md` (in your workspace) for full policy.
+
+- **Default model:** Sonnet — the sync plan review and the one-time legacy-`CLAUDE.md` split are judgment work
+- **Deterministic parts:** init, add-project, sync planning and apply, launcher generation — scripts, not LLM calls
+- **Promote to Opus when:** never — no decision here is architectural
+- **Demote to Haiku when:** running `init` or `add-project` with confirmed paths — the scripts do the work and the agent only relays the summary
+
 ## Workspace conventions
 
 - **Sibling layout.** The boilerplate source clone and the workspace live at sibling paths — for example, `~/src/memnyx/` and `~/workspace/`. Source must NOT live inside the workspace, and the workspace must NOT live inside the source. `init` refuses if the layout is wrong.
@@ -57,7 +66,7 @@ The init action is **idempotent**. Re-running is safe:
 - Other docs (`architecture.md`, `conventions.md`, `cognee-usage.md`, etc.) are deployed only if missing in the workspace (templates, evolved by the user after init).
 - `CLAUDE.md` (base) is generated from the template only if missing; `CLAUDE.fork.md` (fork overlay) is deployed only if missing and only when the source is a fork; `CLAUDE.local.md` (native local overlay) is seeded only if missing. `MEMORY.md`, `lessons-learned.md`, `project-context.md`, `me/*.md`, `.gitignore`, `settings.json` are likewise deployed only if missing — never overwritten.
 - **Fork overlay source of truth.** A fork's `CLAUDE.fork.md` content is authored at the **fork's repo root** (`<source>/CLAUDE.fork.md`) — deliberately outside `.claude/skills/`, which sync overwrites wholesale, so fork content is never clobbered by a skill sync. The bundled `templates/CLAUDE.fork.md.tmpl` is only a **bootstrap stub**: init/sync render the repo-root file when it exists and fall back to the stub only for a fork that has not authored one yet (`fork_overlay_source` resolves this precedence, shared by init, sync, and the base `@`-include so they never disagree).
-- `<workspace>/shell/memnyx.sh` (the `mmn` launcher) is a **derived artifact** — overwritten on every init and sync. The user's shell profile is edited only with explicit consent, and only via an idempotent managed block (a one-time `.memnyx-backup` of the profile is saved before the first edit).
+- `<workspace>/shell/memnyx.sh` (the `mmn` launcher) is a **derived, per-machine artifact** — overwritten on every init and sync, and kept out of git (it can hold this machine's absolute workspace path). The starter `.gitignore` ignores it for newly created workspaces only: `.gitignore` is deployed only if missing, and nothing untracks a file a workspace already commits, so an existing workspace untracks it itself (`git rm --cached shell/memnyx.sh`) and runs `sync`. The user's shell profile is edited only with explicit consent, and only via an idempotent managed block (a one-time `.memnyx-backup` of the profile is saved before the first edit).
 
 ### Steps
 
@@ -231,7 +240,7 @@ Default mode (no `--apply` flags) prints the plan only; apply mode also regenera
 
 Before launching, `mmn` prints a banner showing the directory it will `cd` into and the exact command it runs (the `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir …` line) — no hidden behaviour. Colour is used only on a TTY.
 
-This is the *supported secondary launch flow* in `docs/v2-design-principles.md`: `/hello` binds such a session by matching `realpath(cwd)` to a registered project. `memnyx.sh` is POSIX-safe (sh/bash/zsh) and derived — never hand-edit it; change `templates/memnyx.sh.tmpl` instead. The launcher exports `MEMNYX_WORKSPACE` and scopes `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` to the command, so the workspace `CLAUDE.md` loads via `--add-dir` without affecting other `claude` invocations.
+This is the *supported secondary launch flow* in `docs/v2-design-principles.md`: `/hello` binds such a session by matching `realpath(cwd)` to a registered project. `memnyx.sh` is POSIX-safe (sh, dash, ksh, bash, zsh), derived and per machine — never hand-edit it, never commit it; change `templates/memnyx.sh.tmpl` instead (tests: `scripts/test_launcher.py`). It exports `MEMNYX_WORKSPACE` as the folder the file actually sits in — bash, zsh and ksh93 can tell where a sourced file lives, and the folder counts only if it holds `.claude/.workspace` — so a copied or moved workspace, or a launcher pulled in from another machine's checkout, finds its own folder instead of the path baked in at generation. A symlink to the file counts as wherever the link sits. dash, mksh and pdksh cannot tell, so they use the baked path. This only helps once the file is sourced: the profile's managed block holds the absolute path of `memnyx.sh`, so after moving a workspace re-run the wiring (`launcher.py --wire-profile`), or the shell skips the file and `mmn` is not found. For a workspace shared through git the file is not shared (it is ignored): each machine regenerates it with `/setup-workspace sync`. If the workspace folder is gone, `mmn <slug>` refuses and names the folder (`/setup-workspace sync` regenerates the file), while plain `mmn` and flag forms warn and still launch in the current folder. The launcher also scopes `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1` to the command, so the workspace `CLAUDE.md` loads via `--add-dir` without affecting other `claude` invocations.
 
 ## Important rules
 
