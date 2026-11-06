@@ -59,15 +59,26 @@ class TestKernelHeaders(unittest.TestCase):
         r = levers_of(snap([brow("linux", "ns/a", 300, fix=297, images=6), brow("linux-libc-dev", "ns/a", 100, images=4,
                                                                                   versions=("5.15.0",)),
                             brow("linux-libc-dev", "ns/b", 50, fix=50, images=2, platforms=("UBUNTU_22_04",)),
-                            brow("openssl/openssl", "ns/a", 70)]))
+                            brow("openssl/openssl", "ns/a", 70), brow("openssl/openssl", "ns/c", 900)]))
+        # No kernel_repos in this snapshot: each repo falls back to its largest kernel row, because
+        # Inspector names a kernel finding under both packages and summing the rows double counts.
         k = by_key(r, "kernel_headers")
-        self.assertEqual(k["removes_ch"], 450)
+        self.assertEqual(k["removes_ch"], 350)
         self.assertEqual(k["repos"], 2)
         a = k["rows"][0]
-        self.assertEqual((a["repo"], a["ch"], a["images"]), ("ns/a", 400, 6))
-        self.assertEqual(a["versions"], ["5.15.0", "6.1.1"])
-        self.assertEqual(a["fix_pct"], 99.2)
-        self.assertEqual(k["fix_pct"], round(100 * 447 / 450, 1))
+        self.assertEqual((a["repo"], a["ch"], a["images"]), ("ns/a", 300, 6))
+        self.assertEqual(a["versions"], ["6.1.1"])
+        self.assertEqual(a["fix_pct"], 99.0)
+        self.assertEqual(k["fix_pct"], round(100 * 347 / 350, 1))
+
+    def test_kernel_repos_when_captured_are_the_lever(self):
+        s = snap([brow("linux", "ns/a", 300), brow("linux-libc-dev", "ns/a", 300)])
+        s["raw"]["package_breakdown"]["kernel_repos"] = [
+            {"repo": "ns/a", "ch": 310, "fix_available": 300, "images": 7, "platforms": ["P"],
+             "versions": ["5.15.0", "6.1.1"], "layers": [{"layer": "L1", "ch": 310}]}]
+        k = by_key(levers_of(s), "kernel_headers")
+        self.assertEqual((k["removes_ch"], k["rows"][0]["images"], k["rows"][0]["versions"]),
+                         (310, 7, ["5.15.0", "6.1.1"]))
 
     def test_bundled_runtimes_exclude_kernel_packages(self):
         r = levers_of(snap([brow("linux", "ns/a", 300), brow("openssl/openssl", "ns/a", 70, fix=35),
@@ -181,10 +192,12 @@ class TestRendering(unittest.TestCase):
 
 # ── captures ─────────────────────────────────────────────────────────────────
 
-def finding(pkg, repo, image, fix="YES", version="6.1.1", layer="L1", platform="DEBIAN_12", others=()):
+def finding(pkg, repo, image, fix="YES", version="6.1.1", layer="L1", platform="DEBIAN_12", others=(), arn=None):
     vps = [{"name": o} for o in others] + [{"name": pkg, "version": version, "sourceLayerHash": layer}]
-    return {"fixAvailable": fix, "packageVulnerabilityDetails": {"vulnerablePackages": vps},
-            "resources": [{"id": image, "details": {"awsEcrContainerImage": {"repositoryName": repo, "platform": platform}}}]}
+    img = {"repositoryName": repo, "platform": platform}
+    return {**({"findingArn": arn} if arn else {}),
+            "fixAvailable": fix, "packageVulnerabilityDetails": {"vulnerablePackages": vps},
+            "resources": [{"id": image, "details": {"awsEcrContainerImage": img}}]}
 
 
 class FindingsStub:
@@ -228,10 +241,91 @@ class TestPackageBreakdown(unittest.TestCase):
         whole = ps.package_breakdown(FindingsStub(self.F), {"linux"})
         self.assertEqual(sharded["rows"], whole["rows"])
 
+    K = {"linux", "linux-libc-dev"}
+
+    def _kernel(self, F, repos=("ns/a",)):
+        return ps.package_breakdown(FindingsStub(F), self.K, list(repos), kernel_names=self.K)
+
+    def test_rows_stay_complete_and_kernel_repos_count_each_finding_once(self):
+        # Inspector names a kernel advisory against both linux and linux-libc-dev, and both
+        # packages' queries return it: rows must match the console, the lever must count findings.
+        both = finding("linux-libc-dev", "ns/a", "i1", others=("linux",), arn="arn:1")
+        only = finding("linux-libc-dev", "ns/a", "i2", arn="arn:2")
+        r = self._kernel({("linux", "ns/a"): [both], ("linux-libc-dev", "ns/a"): [both, only]})
+        self.assertEqual({(x["package"], x["ch"]) for x in r["rows"]}, {("linux", 1), ("linux-libc-dev", 2)})
+        k = r["kernel_repos"][0]
+        self.assertEqual((k["repo"], k["ch"], k["fix_available"], k["images"]), ("ns/a", 2, 2, 2))
+        self.assertEqual(lv.kernel_headers(r["kernel_repos"])["removes_ch"], 2)
+
+    def test_kernel_record_takes_layers_and_versions_from_every_kernel_entry(self):
+        # The linux entry carries no layer or version; the finding must still be netted and versioned.
+        f = finding("linux-libc-dev", "ns/a", "i1", version="5.15.0", layer="L9", others=("linux",), arn="arn:1")
+        r = self._kernel({("linux", "ns/a"): [f], ("linux-libc-dev", "ns/a"): [f]})
+        k = r["kernel_repos"][0]
+        self.assertEqual((k["versions"], k["layers"]), (["5.15.0"], [{"layer": "L9", "ch": 1}]))
+
+    def test_kernel_images_are_a_union_not_the_largest_row(self):
+        f1 = finding("linux", "ns/a", "i1", others=("linux-libc-dev",), arn="arn:1")
+        f2 = finding("linux-libc-dev", "ns/a", "i2", arn="arn:2")
+        f3 = finding("linux-libc-dev", "ns/a", "i3", arn="arn:3")
+        r = self._kernel({("linux", "ns/a"): [f1], ("linux-libc-dev", "ns/a"): [f1, f2, f3]})
+        self.assertEqual(r["kernel_repos"][0]["images"], 3)
+
+    def test_a_finding_without_an_arn_still_counts_once(self):
+        f = finding("linux-libc-dev", "ns/a", "i1", others=("linux",))
+        f["packageVulnerabilityDetails"]["vulnerabilityId"] = "CVE-1"
+        r = self._kernel({("linux", "ns/a"): [f], ("linux-libc-dev", "ns/a"): [f]})
+        self.assertEqual(r["kernel_repos"][0]["ch"], 1)
+
+    def test_bundled_rows_are_untouched_by_kernel_dedup(self):
+        # A finding naming a bundled package and a kernel package stays in the bundled row.
+        f = finding("go/stdlib", "ns/a", "i1", others=("linux",), arn="arn:1")
+        names = self.K | {"go/stdlib"}
+        r = ps.package_breakdown(FindingsStub({("go/stdlib", "ns/a"): [f], ("linux", "ns/a"): [f]}),
+                                 names, ["ns/a"], kernel_names=self.K)
+        self.assertEqual({(x["package"], x["ch"]) for x in r["rows"]}, {("go/stdlib", 1), ("linux", 1)})
+
+    def test_base_layer_netting_subtracts_each_kernel_finding_once(self):
+        f = finding("linux-libc-dev", "ns/a", "i1", layer="L1", others=("linux",), arn="arn:1")
+        f["packageVulnerabilityDetails"]["vulnerablePackages"][0].update(version="6.1.1", sourceLayerHash="L1")
+        r = self._kernel({("linux", "ns/a"): [f], ("linux-libc-dev", "ns/a"): [f]})
+        layers = [{"layer": "L1", "c": 0, "h": 3, "images": 1, "repo_list": ["ns/a", "ns/b"]}]
+        b = lv.base_layers({"raw": {"layers": layers}}, r["rows"], r["kernel_repos"], self.K)
+        self.assertEqual(b["rows"][0]["ch"], 2)
+
+    def test_snapshots_without_kernel_repos_fall_back_to_the_largest_row(self):
+        rows = [{"package": "linux", "repo": "ns/a", "ch": 5, "fix_available": 5, "images": 2,
+                 "platforms": ["P"], "versions": ["v"], "layers": [{"layer": "L1", "ch": 5}]},
+                {"package": "linux-libc-dev", "repo": "ns/a", "ch": 5, "fix_available": 5, "images": 2,
+                 "platforms": ["P"], "versions": ["v"], "layers": [{"layer": "L1", "ch": 5}]}]
+        curr = {"raw": {"package_breakdown": {"status": "ok", "rows": rows}}}
+        k = lv._kernel_records(curr, rows, self.K)
+        self.assertEqual([(x["repo"], x["ch"]) for x in k], [("ns/a", 5)])
+
+    def test_without_kernel_names_there_is_no_kernel_record(self):
+        f = finding("linux", "ns/a", "i1", arn="arn:1")
+        r = ps.package_breakdown(FindingsStub({("linux", "ns/a"): [f]}), self.K, ["ns/a"])
+        self.assertIsNone(r["kernel_repos"])
+        k = by_key(levers_of({"raw": {"account_totals": {"critical": 0, "high": 1},
+                                      "package_breakdown": {"status": "ok", "rows": r["rows"],
+                                                            "kernel_repos": r["kernel_repos"]}}}), "kernel_headers")
+        self.assertEqual(k["removes_ch"], 1)  # the fallback, not a lever of zero
+
+    def test_a_finding_naming_a_bundled_and_a_kernel_package_is_netted_once(self):
+        f = finding("go/stdlib", "ns/a", "i1", layer="L1", others=("linux",), arn="arn:1")
+        f["packageVulnerabilityDetails"]["vulnerablePackages"][0].update(version="6.1.1", sourceLayerHash="L1")
+        names = self.K | {"go/stdlib"}
+        r = ps.package_breakdown(FindingsStub({("go/stdlib", "ns/a"): [f], ("linux", "ns/a"): [f]}),
+                                 names, ["ns/a"], kernel_names=self.K)
+        layers = [{"layer": "L1", "c": 0, "h": 3, "images": 1, "repo_list": ["ns/a", "ns/b"]}]
+        b = lv.base_layers({"raw": {"layers": layers}}, r["rows"], r["kernel_repos"], self.K)
+        self.assertEqual(b["rows"][0]["ch"], 2)
+
     def test_any_failure_leaves_no_rows(self):
         r = ps.package_breakdown(FindingsStub(self.F, fail=("linux", "ns/b")), {"linux"}, ["ns/a", "ns/b"])
         self.assertTrue(r["status"].startswith("failed"))
         self.assertIsNone(r["rows"])
+        self.assertIsNone(r["kernel_repos"])
 
 
 class NodeStub:

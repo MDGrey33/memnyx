@@ -69,22 +69,33 @@ def _breakdown_rows(curr):
     return b["rows"]
 
 
-def kernel_headers(rows, kernel_packages):
-    """Per repo: findings, images, OS, header versions, share with a fixed version."""
-    by_repo = {}
+def _kernel_records(curr, rows, kernel_packages):
+    """One record per repo that counts each kernel finding once.
+
+    Inspector reports a kernel advisory against both `linux` and
+    `linux-libc-dev`, so the per-package rows hold most kernel findings twice.
+    Snapshots captured since the breakdown recorded `kernel_repos` carry the
+    exact count. Older ones fall back to each repo's largest kernel row, which
+    is exact where every finding names the largest package, as in every
+    snapshot stored before the change.
+    """
+    exact = _get(curr, "raw", "package_breakdown", "kernel_repos")
+    if isinstance(exact, list):
+        return [dict(x) for x in exact]
+    best = {}
     for r in rows:
-        if r["package"] not in kernel_packages:
-            continue
-        x = by_repo.setdefault(r["repo"], {"repo": r["repo"], "ch": 0, "fix_available": 0, "images": 0,
-                                           "platforms": set(), "versions": set()})
-        x["ch"] += r["ch"]
-        x["fix_available"] += r["fix_available"]
-        x["images"] = max(x["images"], r["images"])  # the same images carry several header packages
-        x["platforms"].update(r.get("platforms") or [])
-        x["versions"].update(r.get("versions") or [])
-    out = sorted(by_repo.values(), key=lambda x: (-x["ch"], x["repo"]))
+        if r["package"] in kernel_packages and r["ch"] > best.get(r["repo"], {"ch": -1})["ch"]:
+            best[r["repo"]] = r
+    return [{"repo": repo, "ch": r["ch"], "fix_available": r["fix_available"], "images": r["images"],
+             "platforms": list(r.get("platforms") or []), "versions": list(r.get("versions") or []),
+             "layers": list(r.get("layers") or [])} for repo, r in best.items()]
+
+
+def kernel_headers(kernel_repos):
+    """Per repo: findings, images, OS, header versions, share with a fixed version."""
+    out = sorted(({k: x[k] for k in ("repo", "ch", "fix_available", "images", "platforms", "versions")}
+                  for x in kernel_repos), key=lambda x: (-x["ch"], x["repo"]))
     for x in out:
-        x["platforms"], x["versions"] = sorted(x["platforms"]), sorted(x["versions"])
         x["fix_pct"] = _pct(x["fix_available"], x["ch"])
     total = sum(x["ch"] for x in out)
     return _lever("kernel_headers", total, out[:ROWS_SHOWN], repos=len(out),
@@ -110,7 +121,7 @@ def bundled_runtimes(rows, kernel_packages):
                   fix_pct=_pct(sum(x["fix_available"] for x in out), total))
 
 
-def base_layers(curr, rows):
+def base_layers(curr, rows, kernel_repos=None, kernel_packages=()):
     """Shared base layers ranked by critical+high, net of findings the kernel-header and
     bundled-runtime levers already count.
 
@@ -127,8 +138,11 @@ def base_layers(curr, rows):
             return None
     if not isinstance(layers, list):
         return None
+    # Kernel findings are netted once each, from the per-repo kernel records:
+    # the per-package rows hold most of them twice.
     counted = {}
-    for r in rows or []:
+    netted = [r for r in rows or [] if r["package"] not in kernel_packages] + list(kernel_repos or [])
+    for r in netted:
         for l in r.get("layers") or []:
             counted[l["layer"]] = counted.get(l["layer"], 0) + l["ch"]
     out = []
@@ -193,10 +207,12 @@ def node_evidence(curr):
 def remediation_levers(curr, managers, kernel_packages, application_managers):
     """Every lever the snapshot can support, largest first, plus the host evidence."""
     rows = _breakdown_rows(curr)
+    kernel = _kernel_records(curr, rows, kernel_packages) if rows is not None else None
     levers = []
     if rows is not None:
-        levers += [kernel_headers(rows, kernel_packages), bundled_runtimes(rows, kernel_packages)]
-    levers += [base_layers(curr, rows), dependabot_dependencies(curr, managers, application_managers)]
+        levers += [kernel_headers(kernel), bundled_runtimes(rows, kernel_packages)]
+    levers += [base_layers(curr, rows, kernel, kernel_packages),
+               dependabot_dependencies(curr, managers, application_managers)]
     levers = [l for l in levers if l is not None]
     levers.sort(key=lambda l: -l["removes_ch"])
     total = _get(curr, "raw", "account_totals")

@@ -90,6 +90,8 @@ class TestCaptureMain(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             breakdown, _ = self.run_main(d)
             self.assertLessEqual(kernel, set(breakdown.call_args.args[1]))
+            # Without kernel_names the capture writes no kernel record and the lever falls back.
+            self.assertEqual(set(breakdown.call_args.kwargs.get("kernel_names") or ()), set(ps.KERNEL_PACKAGES))
 
 
 if __name__ == "__main__":

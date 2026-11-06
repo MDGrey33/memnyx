@@ -507,8 +507,21 @@ def _ch_filter(extra):
 BREAKDOWN_WORKERS = 8
 
 
-def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS):
+def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS, kernel_names=None):
     """Critical+high per (package, ECR repo) for the packages one image change removes.
+
+    Each row holds every finding that names its package, as the Inspector
+    console counts it, so a finding naming two packages appears in both rows.
+    Inspector reports each kernel advisory against both `linux` and
+    `linux-libc-dev`, so summing kernel rows counts most findings twice.
+    `kernel_repos` counts them once: one record per repo, built from every
+    finding that names any of `kernel_names`. Without `kernel_names` there is
+    no record (None), never an empty one: an empty one reads as no kernel
+    findings at all.
+
+    A row's `layers` is the base-layer netting basis, so it leaves out findings
+    that also name a kernel package: those are netted once, through the kernel
+    record.
 
     Kernel headers and bundled runtimes are fixed per Dockerfile, so the
     remediation question is "which repos", which the per-package aggregation
@@ -547,8 +560,8 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS):
             results = list(pool.map(fetch, units))
     except AWS_ERRORS as e:
         print(f"  WARN: package breakdown failed — field left empty: {e}", file=sys.stderr)
-        return {**out, "status": f"failed: {_code(e)}", "rows": None}
-    acc = {}
+        return {**out, "status": f"failed: {_code(e)}", "rows": None, "kernel_repos": None}
+    acc, kernel = {}, {}
     for found in results:
         for name, f in found:
                 vp = next((v for v in (f.get("packageVulnerabilityDetails") or {}).get("vulnerablePackages") or []
@@ -567,14 +580,56 @@ def package_breakdown(c, names, repos=None, workers=BREAKDOWN_WORKERS):
                     r["platforms"].add(img["platform"])
                 if vp.get("version"):
                     r["versions"].add(vp["version"])
-                if vp.get("sourceLayerHash"):
+                netted_as_kernel = kernel_names is not None and name not in kernel_names and any(
+                    v.get("name") in kernel_names
+                    for v in (f.get("packageVulnerabilityDetails") or {}).get("vulnerablePackages") or [])
+                if vp.get("sourceLayerHash") and not netted_as_kernel:
                     r["layers"][vp["sourceLayerHash"]] += 1
+                if kernel_names is not None and name in kernel_names:
+                    _kernel_finding(kernel, repo, f, res, img, kernel_names)
     rows = [{"package": k[0], "repo": k[1], "ch": v["ch"], "fix_available": v["fix_available"],
              "images": len(v["images"]), "platforms": sorted(v["platforms"]), "versions": sorted(v["versions"]),
              "layers": [{"layer": h, "ch": n} for h, n in sorted(v["layers"].items(), key=lambda kv: -kv[1])]}
             for k, v in acc.items()]
     rows.sort(key=lambda r: (-r["ch"], r["package"], r["repo"]))
-    return {**out, "rows": rows}
+    return {**out, "rows": rows, "kernel_repos": None if kernel_names is None else _kernel_repos(kernel)}
+
+
+def _finding_key(f, res):
+    """A finding's identity. The ARN when present; otherwise the image and the
+    advisory, which together name one finding."""
+    return f.get("findingArn") or (res.get("id"), (f.get("packageVulnerabilityDetails") or {}).get("vulnerabilityId"),
+                                   f.get("title"), f.get("firstObservedAt"))
+
+
+def _kernel_finding(kernel, repo, f, res, img, kernel_names):
+    """Fold one kernel finding into its repo's record, once per finding: every
+    kernel package's query returns the same finding, so the first sighting
+    records it and later ones are skipped. Versions and layers come from all of
+    the finding's kernel entries, not only the queried package's."""
+    k = kernel.setdefault(repo, {"findings": set(), "fix_available": 0, "images": set(), "platforms": set(),
+                                 "versions": set(), "layers": defaultdict(int)})
+    key = _finding_key(f, res)
+    if key in k["findings"]:
+        return
+    k["findings"].add(key)
+    k["fix_available"] += f.get("fixAvailable") == "YES"
+    k["images"].add(res.get("id"))
+    if img.get("platform"):
+        k["platforms"].add(img["platform"])
+    entries = [v for v in (f.get("packageVulnerabilityDetails") or {}).get("vulnerablePackages") or []
+               if v.get("name") in kernel_names]
+    k["versions"].update(v["version"] for v in entries if v.get("version"))
+    for layer in {v["sourceLayerHash"] for v in entries if v.get("sourceLayerHash")}:
+        k["layers"][layer] += 1
+
+
+def _kernel_repos(kernel):
+    out = [{"repo": repo, "ch": len(k["findings"]), "fix_available": k["fix_available"], "images": len(k["images"]),
+            "platforms": sorted(k["platforms"]), "versions": sorted(k["versions"]),
+            "layers": [{"layer": h, "ch": n} for h, n in sorted(k["layers"].items(), key=lambda kv: -kv[1])]}
+           for repo, k in kernel.items()]
+    return sorted(out, key=lambda x: (-x["ch"], x["repo"]))
 
 
 def node_scan(c):
@@ -1033,7 +1088,7 @@ def main():
     lever_pkgs = {n for n in names if n in KERNEL_PACKAGES or managers.get(n) == "GENERIC"}
     print(f"→ per-repo breakdown for {len(lever_pkgs)} kernel-header and bundled-runtime packages ...", flush=True)
     repo_names = [r.get("repositoryAggregation", {}).get("repository") for r in repositories]
-    breakdown = package_breakdown(c, lever_pkgs, [r for r in repo_names if r])
+    breakdown = package_breakdown(c, lever_pkgs, [r for r in repo_names if r], kernel_names=KERNEL_PACKAGES)
     print("→ node scan ...", flush=True)
     nodes = node_scan(c)
     print("→ node OS release ...", flush=True)
