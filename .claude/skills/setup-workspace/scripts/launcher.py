@@ -9,13 +9,16 @@ Two stages, separated so profile editing is opt-in (the agent gets the user's
 consent before touching a shell profile):
 
 1. Always: write `<workspace>/shell/memnyx.sh` from the template, substituting
-   the workspace path. This file is a DERIVED artifact — overwritten on every
-   run (and on `/setup-workspace sync`), so never hand-edit it.
+   the workspace path (the fallback: bash, zsh and ksh93 prefer the folder the
+   file actually sits in, see the template). This file is a DERIVED, per-machine
+   artifact — overwritten on every run (and on `/setup-workspace sync`), so never
+   hand-edit or commit it.
 
 2. With --wire-profile: insert/refresh a delimited managed block in the user's
    shell profile that sources memnyx.sh. Idempotent — the block between markers
    is replaced, never duplicated. A one-time backup of the profile is written
-   before the first edit.
+   before the first edit. The block holds the absolute path of memnyx.sh, so
+   re-run --wire-profile after moving a workspace.
 
 Shell detection picks a sensible default profile (zsh -> ~/.zshrc, bash ->
 ~/.bashrc, otherwise ~/.profile). Override with --profile when the user's setup

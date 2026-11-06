@@ -28,8 +28,20 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 import launcher  # noqa: E402
 
-SELF_LOCATING = [s for s in ("bash", "zsh", "ksh") if shutil.which(s)]
-BAKED_ONLY = [s for s in ("dash",) if shutil.which(s)]
+def _is_ksh93() -> bool:
+    """True only for a ksh that has ${.sh.version} (AT&T ksh93). mksh and pdksh
+    set KSH_VERSION too, but cannot say where a sourced file lives."""
+    exe = shutil.which("ksh")
+    if not exe:
+        return False
+    r = subprocess.run([exe, "-c", 'echo "${.sh.version}"'], capture_output=True, text=True)
+    return r.returncode == 0 and r.stdout.strip() != ""
+
+
+SELF_LOCATING = [s for s in ("bash", "zsh") if shutil.which(s)] + (["ksh"] if _is_ksh93() else [])
+BAKED_ONLY = [s for s in ("dash",) if shutil.which(s)] + (
+    ["ksh"] if shutil.which("ksh") and not _is_ksh93() else [])
+BASH_ONLY = [s for s in ("bash",) if shutil.which(s)]
 ALL_SHELLS = SELF_LOCATING + BAKED_ONLY
 
 PRINT_WS = '. "$1"; printf %s "$MEMNYX_WORKSPACE"'
@@ -110,18 +122,28 @@ def test_shells_that_cannot_locate_the_file_keep_the_baked_path(shell, tmp_path)
 
 @pytest.mark.parametrize("shell", SELF_LOCATING)
 def test_relative_source_paths_from_other_folders(shell, tmp_path):
-    ws = make_workspace(tmp_path)
-    r1 = run_sh(shell, '. ./memnyx.sh; printf %s "$MEMNYX_WORKSPACE"', cwd=ws / "shell")
+    # The workspace must have moved: on an unmoved one the baked path equals the
+    # real one and this test would pass with no self-location code at all.
+    ws = make_workspace(tmp_path / "machine-a")
+    dest_parent = tmp_path / "machine-b"
+    dest_parent.mkdir()
+    new_ws = relocate(ws, dest_parent)
+    r1 = run_sh(shell, '. ./memnyx.sh; printf %s "$MEMNYX_WORKSPACE"', cwd=new_ws / "shell")
     r2 = run_sh(shell, '. ../../shell/memnyx.sh; printf %s "$MEMNYX_WORKSPACE"',
-                cwd=ws / "projects" / "demo")
-    assert (r1.returncode, r1.stdout) == (0, str(ws)), r1.stderr
-    assert (r2.returncode, r2.stdout) == (0, str(ws)), r2.stderr
+                cwd=new_ws / "projects" / "demo")
+    assert (r1.returncode, r1.stdout) == (0, str(new_ws)), r1.stderr
+    assert (r2.returncode, r2.stdout) == (0, str(new_ws)), r2.stderr
 
 
 @pytest.mark.parametrize("shell", SELF_LOCATING)
 def test_workspace_path_with_spaces(shell, tmp_path):
+    # Moved into a path with spaces: an unquoted expansion in the template would
+    # make `cd` fail quietly and fall back to the old baked path.
     ws = make_workspace(tmp_path / "my work space", "the ws")
-    assert sourced_workspace(shell, ws / "shell" / "memnyx.sh") == str(ws)
+    dest_parent = tmp_path / "other machine"
+    dest_parent.mkdir()
+    new_ws = relocate(ws, dest_parent, "new ws")
+    assert sourced_workspace(shell, new_ws / "shell" / "memnyx.sh") == str(new_ws)
 
 
 @pytest.mark.parametrize("shell", BAKED_ONLY)
@@ -171,7 +193,7 @@ def test_mmn_opens_a_project_after_the_workspace_moved(shell, tmp_path, fake_cla
 @pytest.mark.parametrize("shell", SELF_LOCATING)
 def test_mmn_still_refuses_unknown_and_path_like_slugs(shell, tmp_path, fake_claude):
     ws = make_workspace(tmp_path)
-    for slug in ("nope", "../x", "a/b", ".."):
+    for slug in ("nope", "../x", "a/b", "..", "../shell", "demo/.."):
         r = run_sh(shell, '. "$1"; mmn "$2"', str(ws / "shell" / "memnyx.sh"), slug,
                    path_prefix=fake_claude)
         assert r.returncode != 0, f"{slug!r} should be refused"
@@ -205,3 +227,44 @@ def test_mmn_names_the_missing_workspace_instead_of_blaming_the_slug(
     assert "FAKE-CLAUDE" not in r.stdout
     assert "workspace folder" in r.stderr and str(ws) in r.stderr
     assert "not a registered project" not in r.stderr
+
+
+@pytest.mark.parametrize("shell", BASH_ONLY)
+def test_bare_file_name_found_in_the_current_folder(shell, tmp_path):
+    # bash looks in the current folder for `. memnyx.sh`; the file then reports a
+    # bare name. zsh and ksh do not search the current folder, so they never get here.
+    ws = make_workspace(tmp_path / "machine-a")
+    dest_parent = tmp_path / "machine-b"
+    dest_parent.mkdir()
+    new_ws = relocate(ws, dest_parent)
+    r = run_sh(shell, '. memnyx.sh; printf %s "$MEMNYX_WORKSPACE"', cwd=new_ws / "shell")
+    assert (r.returncode, r.stdout) == (0, str(new_ws)), r.stderr
+
+
+@pytest.mark.parametrize("shell", BAKED_ONLY)
+def test_a_shell_that_sets_ksh_version_without_sh_file_still_sources(shell, tmp_path):
+    # Stand-in for mksh and pdksh: KSH_VERSION is set but ${.sh.file} does not
+    # exist. Sourcing must neither exit the shell nor stop before `mmn` is defined.
+    ws = make_workspace(tmp_path / "machine-a")
+    dest_parent = tmp_path / "machine-b"
+    dest_parent.mkdir()
+    new_ws = relocate(ws, dest_parent)
+    script = ('KSH_VERSION="@(#)MIRBSD KSH R59"; export KSH_VERSION; . "$1"; '
+              'printf %s "$MEMNYX_WORKSPACE"; type mmn >/dev/null 2>&1 && printf " mmn-defined"')
+    r = run_sh(shell, script, str(new_ws / "shell" / "memnyx.sh"))
+    assert (r.returncode, r.stdout) == (0, f"{ws} mmn-defined"), r.stderr
+
+
+@pytest.mark.parametrize("args", [(), ("-p", "hi")])
+@pytest.mark.parametrize("shell", BAKED_ONLY)
+def test_mmn_warns_but_still_launches_in_the_current_folder_when_the_workspace_is_gone(
+        shell, args, tmp_path, fake_claude):
+    ws = make_workspace(tmp_path / "machine-a")
+    dest_parent = tmp_path / "machine-b"
+    dest_parent.mkdir()
+    new_ws = relocate(ws, dest_parent)
+    r = run_sh(shell, '. "$1"; shift; mmn "$@"', str(new_ws / "shell" / "memnyx.sh"), *args,
+               path_prefix=fake_claude)
+    assert r.returncode == 0, r.stderr
+    assert "FAKE-CLAUDE" in r.stdout
+    assert "workspace folder" in r.stderr and str(ws) in r.stderr

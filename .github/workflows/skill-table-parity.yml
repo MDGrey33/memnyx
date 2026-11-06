@@ -7,7 +7,8 @@ name: skill-table parity
 #                             scripts/check_skill_tables.py for the rationale.
 #   setup-workspace-tests   — regression tests for the setup-workspace scripts
 #                             (add_project.py CLAUDE.md generate/patch behavior,
-#                             fork-overlay source resolution) and the parity
+#                             fork-overlay source resolution, the mmn shell launcher
+#                             across bash, dash, zsh and ksh) and the parity
 #                             checker's union logic. See the test_*.py files under
 #                             .claude/skills/setup-workspace/scripts/ and scripts/.
 
@@ -44,6 +45,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install the shells the launcher tests exercise
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zsh ksh
+          for s in bash dash zsh ksh; do printf '%s: ' "$s"; command -v "$s"; done
       - run: pip install pytest
       - name: Test setup-workspace + parity-checker scripts
         run: pytest .claude/skills/setup-workspace/scripts/ scripts/ -v
