@@ -13,6 +13,15 @@ args: |
 
 Owns workspace lifecycle: `init` (first-time setup), `add-project` (register a project), and `sync` (update from source).
 
+## Model Selection
+
+See `.claude/skills/_shared/MODEL_SELECTION.md` (in your workspace) for full policy.
+
+- **Default model:** Sonnet — the sync plan review and the one-time legacy-`CLAUDE.md` split are judgment work
+- **Deterministic parts:** init, add-project, sync planning and apply, launcher generation — scripts, not LLM calls
+- **Promote to Opus when:** never — no decision here is architectural
+- **Demote to Haiku when:** running `init` or `add-project` with confirmed paths — the scripts do the work and the agent only relays the summary
+
 ## Workspace conventions
 
 - **Sibling layout.** The boilerplate source clone and the workspace live at sibling paths — for example, `~/src/memnyx/` and `~/workspace/`. Source must NOT live inside the workspace, and the workspace must NOT live inside the source. `init` refuses if the layout is wrong.
