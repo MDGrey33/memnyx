@@ -521,13 +521,14 @@ def _days(window):
 def _no_use_credit(r, mode):
     """Why a running workload gets no credit for running, or None. Only the in-use
     mode credits use; there, a Lambda never counts, and pods name a
-    multi-architecture index while Inspector scans the platform images under it."""
+    multi-architecture index while Inspector scans the platform images under it.
+    Worded for readers who do not know what an index or platform image is."""
     if mode != "LAST_IN_USE_AT":
         return None
     if r["kind"] == "lambda":
-        return "Lambda use does not count, only the push date"
+        return "a Lambda, which Inspector never sees as running"
     if r.get("index_platform"):
-        return "pods run the multi-architecture index, so only the push date counts"
+        return "built for several chip types, which Inspector never sees as running"
     return None
 
 
@@ -536,7 +537,7 @@ def _gap_why(r, mode):
     if status == "NOT_IN_COVERAGE":
         return "Inspector has no record of this image"
     if status == "PLATFORMS_UNKNOWN":
-        return "multi-architecture image; its platform images could not be read"
+        return "built for several chip types, and the builds could not be read"
     if status == "UNREAD":
         return f"could not be read ({r.get('reason')})"
     if r.get("reason") == "SCAN_ELIGIBILITY_EXPIRED":
@@ -544,7 +545,7 @@ def _gap_why(r, mode):
     if status == "ACTIVE":
         # Still rescanned. SUCCESSFUL says nothing here; any other reason is kept.
         why = cause or ("rescanning follows the last time Inspector saw it running" if mode == "LAST_IN_USE_AT"
-                        else "rescanning follows its push date or last pull")
+                        else "rescanning follows its upload date or last pull")
         reason = r.get("reason")
         return why if not reason or reason == "SUCCESSFUL" else f"{why} ({reason.replace('_', ' ').lower()})"
     return (r.get("reason") or status or "").replace("_", " ").lower()

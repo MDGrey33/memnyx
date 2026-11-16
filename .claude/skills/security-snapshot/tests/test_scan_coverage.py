@@ -340,7 +340,7 @@ class TestPageRows(unittest.TestCase):
         self.assertEqual((v["push_days"], v["use_days"], v["mode"], v["soon_days"]), (30, 30, "LAST_IN_USE_AT", 14))
         rows = {r["name"]: r for r in v["not_scanned"]}
         self.assertEqual(rows["fn-1"], {"kind": "Lambda", "name": "fn-1", "image": "ns/l@" + "a" * 12,
-                                        "why": "rescanning lapsed: Lambda use does not count, only the push date",
+                                        "why": "rescanning lapsed: a Lambda, which Inspector never sees as running",
                                         "lapse": "2026-08-01"})
         self.assertEqual(rows["fn-2"]["why"], "Inspector has no record of this image")
         self.assertIn("could not be read", rows["ns/i"]["why"])
@@ -359,8 +359,8 @@ class TestPageRows(unittest.TestCase):
             [{"function": "fn-1", "repo": "ns/l", "digest": D["b"], "status": "ACTIVE",
               "reason": "SUCCESSFUL", "lapse_at": soon.isoformat()}]))
         rows = {r["name"]: r["why"] for r in mp._scan_gaps({"scan_gaps": g})["lapsing"]}
-        self.assertEqual(rows, {"fn-1": "Lambda use does not count, only the push date",
-                                "ns/i (linux/amd64)": "pods run the multi-architecture index, so only the push date counts",
+        self.assertEqual(rows, {"fn-1": "a Lambda, which Inspector never sees as running",
+                                "ns/i (linux/amd64)": "built for several chip types, which Inspector never sees as running",
                                 "ns/run": "rescanning follows the last time Inspector saw it running"})
         self.assertNotIn("successful", json.dumps(rows))
         # Any reason other than SUCCESSFUL still says something, so it stays.
@@ -371,7 +371,7 @@ class TestPageRows(unittest.TestCase):
         # Rescanning by pull date credits pulls, so neither cause applies.
         g["windows"] = {**W30, "mode": "LAST_PULL_DATE"}
         pulled = {r["name"]: r["why"] for r in mp._scan_gaps({"scan_gaps": g})["lapsing"]}
-        self.assertEqual(set(pulled.values()), {"rescanning follows its push date or last pull"})
+        self.assertEqual(set(pulled.values()), {"rescanning follows its upload date or last pull"})
 
     def test_no_capture_no_panel(self):
         self.assertIsNone(mp._scan_gaps({"scan_gaps": None}))

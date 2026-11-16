@@ -446,6 +446,12 @@ a.repo-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
 .mv-lever details summary{cursor:pointer;color:#7fb0ff;font-size:12px;padding-top:8px;list-style:none}
 .mv-lever details summary::before{content:'+ '}.mv-lever details[open] summary::before{content:'− '}
 .mv-sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+.mv-gaps{display:flex;flex-direction:column;gap:18px}
+.mv-gap-card{border-left:4px solid var(--tone)}
+.mv-gap-h{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:600;color:var(--text);margin-bottom:4px}
+.mv-gap-h::before{content:'';width:10px;height:10px;border-radius:50%;background:var(--tone);flex:none}
+.mv-gap-n{font-size:12px;font-weight:700;color:var(--tone);background:color-mix(in srgb,var(--tone) 16%,transparent);border:1px solid color-mix(in srgb,var(--tone) 45%,transparent);padding:1px 10px;border-radius:999px}
+.mv-gap-card .mv-num{color:var(--tone);font-weight:600}
 .dtag-basis{background:#f59e0b22;color:#fbbf24;border:1px solid #f59e0b55}
 .dtag-note{background:#a78bfa22;color:#c4b5fd;border:1px solid #a78bfa55}
 .mv-lever h3{font-size:15px;font-weight:600;line-height:1.35}

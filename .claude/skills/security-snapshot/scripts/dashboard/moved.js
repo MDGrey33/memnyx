@@ -167,6 +167,11 @@ function mvGapRow(r, lapseLabel) {
     <div class="mv-num" data-lapse>${r.lapse ? esc(lapseLabel) + ' ' + esc(r.lapse) : 'no date'}</div><div class="mv-acts"></div></div>`;
 }
 
+// Each list is its own card, toned by severity, so the two never read as one list.
+function mvGapHead(title, n) {
+  return `<h3 class="mv-gap-h">${esc(title)} <span class="mv-gap-n">${mvN(n)}</span></h3>`;
+}
+
 // A What moved section: its heading carries the share link, its box the anchor.
 function mvSecOpen(title, attrs = '') {
   const id = slugPanel(title);
@@ -176,30 +181,30 @@ function mvSecOpen(title, attrs = '') {
 function mvScanGaps(g) {
   if (!g) return '';
   // A null window is LIFETIME (push) or not set (use).
-  const push = g.push_days == null ? 'for as long as it exists after it is pushed' : `for ${esc(g.push_days)} days after it is pushed`;
+  const push = g.push_days == null ? 'for as long as it stays in ECR' : `for ${esc(g.push_days)} days after it is uploaded to ECR`;
   const use = g.use_days == null ? '' : g.mode === 'LAST_IN_USE_AT'
-    ? `, or ${esc(g.use_days)} days after it was last seen running on the cluster, whichever is later`
-    : `, or ${esc(g.use_days)} days after it was last pulled, whichever is later`;
+    ? ` It keeps rescanning while it sees the image running on the cluster, until ${esc(g.use_days)} days after it last did.`
+    : ` It also keeps rescanning until ${esc(g.use_days)} days after the image was last pulled.`;
   // "Running" here is what this panel sees; "in use" is what Inspector credits. Two
   // running workloads earn no credit, which is how a running image stops being rescanned.
   const lambda = g.mode === 'LAST_IN_USE_AT' && g.push_days != null
-    ? ` Two kinds of running workload never count as use: a container Lambda, and a pod running a multi-architecture image (the pod names the index, and Inspector scans the platform images under it). Those stop being rescanned ${esc(g.push_days)} days after the image was pushed, however long they run.` : '';
-  const rule = `Inspector rescans an image ${push}${use}.${lambda} After that, new CVEs never reach it. Images from outside this account's ECR, and Fargate pods, are not checked.`;
+    ? ` It never sees two kinds of workload as running: Lambda functions, and images built for more than one chip type. Those are rescanned for ${esc(g.push_days)} days after upload and then never again, however long they run.` : '';
+  const rule = `Inspector rescans an image for new vulnerabilities ${push}.${use}${lambda} Once rescanning stops, new vulnerabilities are not reported for the image until it is rebuilt and redeployed. Images stored outside this account's ECR are not covered.`;
   const state = g.not_scanned.length ? 'gaps' : g.lapsing.length ? 'lapsing' : 'clear';
   const notScanned = g.not_scanned.length
-    ? `<h4 class="mv-chart-title">Running, not rescanned (${mvN(g.not_scanned.length)})</h4>
-      <div class="mv-sub">Inspector is not rescanning these, or could not say: each row gives the reason. Where rescanning lapsed, new CVEs are not reported for it, and rebuilding and redeploying the image restarts it.</div><div class="mv-list">${g.not_scanned.map(r => mvGapRow(r, 'lapsed')).join('')}</div>`
+    ? `<div class="card mv-gap-card mv-tone-risk" data-gap-list="not-rescanned">${mvGapHead('Running, not rescanned', g.not_scanned.length)}
+      <div class="mv-sub">Inspector is not rescanning these, or could not say: each row gives the reason. Rebuilding and redeploying the image starts rescanning again.</div><div class="mv-list">${g.not_scanned.map(r => mvGapRow(r, 'lapsed')).join('')}</div></div>`
     : '';
   const lapsing = g.lapsing.length
-    ? `<h4 class="mv-chart-title">Rescanning lapses within ${esc(g.soon_days)} days (${mvN(g.lapsing.length)})</h4>
-      <div class="mv-sub">Still rescanned today. Rescanning stops on the date shown unless the image is rebuilt and redeployed first.</div><div class="mv-list">${g.lapsing.map(r => mvGapRow(r, 'lapses')).join('')}</div>`
+    ? `<div class="card mv-gap-card mv-tone-gap" data-gap-list="lapsing">${mvGapHead('Rescanning lapses within ' + g.soon_days + ' days', g.lapsing.length)}
+      <div class="mv-sub">Still rescanned today. Rescanning stops on the date shown unless the image is rebuilt and redeployed first.</div><div class="mv-list">${g.lapsing.map(r => mvGapRow(r, 'lapses')).join('')}</div></div>`
     : '';
   const clear = state === 'clear'
     ? `<p class="mv-meta">All ${mvN(g.running)} running ${g.functions_measured ? 'images Inspector tracks' : 'cluster images Inspector tracks'} are being rescanned, and none lapses within ${esc(g.soon_days)} days.</p>` : '';
   const partial = g.functions_measured ? '' : '<p class="mv-meta">Container Lambdas could not be read this run, so only cluster images are checked.</p>';
   return `${mvSecOpen('Running but not scanned', ` data-gaps="${state}"`)}
     <p class="mv-sec-lede">${rule}</p>
-    <div class="card">${notScanned}${lapsing}${clear}${partial}</div></div>`;
+    <div class="mv-gaps">${notScanned}${lapsing}${clear || partial ? `<div class="card">${clear}${partial}</div>` : ''}</div></div>`;
 }
 
 function mvRepoMovers(repos) {

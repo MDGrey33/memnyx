@@ -223,9 +223,12 @@ using its image, so a container Lambda lapses one push window after its image wa
 pods name a multi-architecture image by its index, which Inspector cannot scan, while the
 platform images it does scan never count as running; the panel judges such an image by the
 platforms the cluster's hosts run, or by all of them when any host's architecture is unknown.
-It does not see images pulled from outside this account's ECR, or Fargate pods. Each row says
-why it lapses: a Lambda, a platform image under a running index, or the last use Inspector
-recorded (the push date or last pull when the account rescans by pull date). `trend_start` in config sets where the trend line begins.
+It does not see images pulled from outside this account's ECR, or Fargate pods; the page names
+only the first, so mention Fargate in the note if the account runs it. The page is written for
+readers who do not know registry terms: "uploaded" not "pushed", "built for several chip types"
+not "multi-architecture index". Each row says why it lapses: a Lambda, a build for one chip type
+under an image the cluster runs, or the last use Inspector recorded (the upload date or last
+pull when the account rescans by pull date). `trend_start` in config sets where the trend line begins.
 
 Every section heading carries a 🔗 that copies a link to that section (`#<tab>/<snapshot>[/<basis>]/<section>`).
 On Apps Script the page cannot read its own address, so the build takes the link's base from

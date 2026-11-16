@@ -474,13 +474,21 @@ test('running but not scanned: each state is keyed in data-gaps and lists its ro
   const bad = gaps(GAPS({ not_scanned: [gapRow('fn-01', 'Lambda', 'rescanning lapsed', '2026-08-01')],
                           lapsing: [gapRow('fn-02', 'Lambda', 'Lambda use does not count', '2026-11-25')] }));
   assert.match(bad, /data-gaps="gaps"/);
-  assert.match(bad, /Running, not rescanned \(1\)[\s\S]*fn-01[\s\S]*<div class="mv-num" data-lapse>lapsed 2026-08-01</);
-  assert.match(bad, /Rescanning lapses within 14 days \(1\)[\s\S]*fn-02[\s\S]*data-lapse>lapses 2026-11-25</);
-  assert.match(bad, /never count as use: a container Lambda, and a pod running a multi-architecture image/);
-  assert.match(bad, /stop being rescanned 30 days after the image was pushed, however long they run/);
+  assert.match(bad, /data-gap-list="not-rescanned">[\s\S]*Running, not rescanned <span class="mv-gap-n">1<\/span>[\s\S]*fn-01[\s\S]*<div class="mv-num" data-lapse>lapsed 2026-08-01</);
+  assert.match(bad, /data-gap-list="lapsing">[\s\S]*Rescanning lapses within 14 days <span class="mv-gap-n">1<\/span>[\s\S]*fn-02[\s\S]*data-lapse>lapses 2026-11-25</);
+  assert.match(bad, /never sees two kinds of workload as running: Lambda functions, and images built for more than one chip type/);
+  assert.match(bad, /rescanned for 30 days after upload and then never again, however long they run/);
+  assert.match(bad, /for 30 days after it is uploaded to ECR\. It keeps rescanning while it sees the image running on the cluster, until 30 days after it last did\./);
   // Each list says what its state means, under its own heading.
-  assert.match(bad, /Running, not rescanned \(1\)<\/h4>\s*<div class="mv-sub">Inspector is not rescanning these, or could not say/);
-  assert.match(bad, /within 14 days \(1\)<\/h4>\s*<div class="mv-sub">Still rescanned today/);
+  assert.match(bad, /Running, not rescanned <span class="mv-gap-n">1<\/span><\/h3>\s*<div class="mv-sub">Inspector is not rescanning these, or could not say/);
+  assert.match(bad, /within 14 days <span class="mv-gap-n">1<\/span><\/h3>\s*<div class="mv-sub">Still rescanned today/);
+  // Two cards, toned apart, so the lists never read as one: lapsed red, lapsing amber.
+  assert.match(bad, /class="card mv-gap-card mv-tone-risk" data-gap-list="not-rescanned"/);
+  assert.match(bad, /class="card mv-gap-card mv-tone-gap" data-gap-list="lapsing"/);
+  // The lapsed card closes before the lapsing one opens: its divs balance.
+  const first = bad.slice(bad.indexOf('<div class="card mv-gap-card mv-tone-risk"'), bad.indexOf('<div class="card mv-gap-card mv-tone-gap"'));
+  assert.ok(first.includes('fn-01'));
+  assert.equal((first.match(/<div\b/g) || []).length, (first.match(/<\/div>/g) || []).length);
   const soon = gaps(GAPS({ lapsing: [gapRow('fn-02', 'Lambda', 'Lambda use does not count', '2026-11-25')] }));
   assert.match(soon, /data-gaps="lapsing"/);
   assert.doesNotMatch(soon, /Running, not rescanned|already stopped/);
@@ -492,14 +500,15 @@ test('running but not scanned: each state is keyed in data-gaps and lists its ro
   assert.match(noLambdas, /Container Lambdas could not be read this run/);
   assert.match(noLambdas, /All 130 running cluster images Inspector tracks/);  // never claims the Lambdas are clear
   const life = gaps(GAPS({ push_days: null }));
-  assert.match(life, /rescans an image for as long as it exists after it is pushed, or 30 days/);
+  assert.match(life, /rescans an image for new vulnerabilities for as long as it stays in ECR\. It keeps rescanning/);
   assert.doesNotMatch(life, /for  days|stops? being rescanned/);
-  assert.doesNotMatch(gaps(GAPS({ use_days: null })), /whichever is later/);
-  assert.match(clear, /Fargate pods, are not checked/);
+  assert.doesNotMatch(gaps(GAPS({ use_days: null })), /keeps rescanning/);
+  assert.match(clear, /Images stored outside this account's ECR are not covered/);
+  assert.doesNotMatch(clear, /Fargate|CVE|multi-architecture|index/);  // plain words only
   assert.doesNotMatch(clear, /could not be read/);
   const pulled = gaps(GAPS({ mode: 'LAST_PULL_DATE' }));
-  assert.match(pulled, /after it was last pulled/);
-  assert.doesNotMatch(pulled, /never count as use/);  // pull mode credits pulls
+  assert.match(pulled, /until 30 days after the image was last pulled/);
+  assert.doesNotMatch(pulled, /never sees two kinds/);  // pull mode credits pulls
   assert.equal(gaps(null), '');
   const esc = gaps(GAPS({ not_scanned: [gapRow('<b>x</b>', 'Lambda', '<i>y</i>', null)] }));
   assert.match(esc, /&lt;b&gt;x&lt;\/b&gt;[\s\S]*&lt;i&gt;y&lt;\/i&gt;[\s\S]*data-lapse>no date</);
