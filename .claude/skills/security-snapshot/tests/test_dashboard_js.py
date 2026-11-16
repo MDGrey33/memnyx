@@ -122,11 +122,56 @@ class TestBuiltPageWhatMoved(unittest.TestCase):
         self.assertEqual(seen["tabs"], {"trend": "#trend/20261007", "moved": "#moved/20261007",
                                         "breakdown": "#breakdown/20261007"})
         for section in ("Why it moved", "What to fix next", "Biggest moves by repo"):
-            self.assertIn(f"<h2>{section}</h2>", seen["moved_current"])
+            sid = section.lower().replace(" ", "-")  # each section is its own share-link anchor
+            self.assertIn(f'data-panel="{sid}"><h2>{section}<button type="button" class="panel-link" '
+                          f'title="Copy a link to this section" onclick="sharePanel(\'{sid}\')">', seen["moved_current"])
         self.assertTrue(seen["moved_active"])
         self.assertEqual(sorted(seen["moved_charts"]), ["mvRepos", "mvTrend", "mvWaterfall"])  # redrawn on returning to the tab
         self.assertEqual(seen["dates"], ["20261007", "20260923"])
         self.assertGreater(seen["kpi"], 0)
+
+
+
+class TestSectionLinks(unittest.TestCase):
+    def test_every_card_title_is_an_anchor_with_a_share_link(self):
+        tmp, page = build_fixture_page()
+        self.addCleanup(tmp.cleanup)
+        titles = re.findall(r'<div class="card-title"([^>]*)>([^<]*)<', page)
+        self.assertGreaterEqual(len(titles), 10)
+        ids = []
+        for attrs, title in titles:
+            sid = bd.slug_panel(title)
+            self.assertEqual(attrs, f' data-panel="{sid}"', title)
+            self.assertIn(f'data-panel="{sid}">{title}<button type="button" class="panel-link" '
+                          f'title="Copy a link to this section" onclick="sharePanel(\'{sid}\')">', page)
+            ids.append(sid)
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertIn("inspector-v2-top-repos", ids)  # the dash and the V2 survive as one slug
+        self.assertIn('<div id="toast" class="toast"', page)
+
+    def test_two_cards_with_one_slug_stop_the_build(self):
+        twice = '<div class="card-title">Top Repos</div><div class="card-title">Top  repos!</div>'
+        with self.assertRaisesRegex(ValueError, "no unique section id"):
+            bd.panel_links(twice)
+        with self.assertRaisesRegex(ValueError, "no unique section id"):
+            bd.panel_links('<div class="card-title">—</div>')
+        with self.assertRaisesRegex(ValueError, "no unique section id"):
+            bd.panel_links('<div class="card-title">20261116</div>')  # would read as a basis
+
+    def test_the_published_url_comes_from_the_deploy_config_and_only_if_it_is_apps_script(self):
+        url = "https://script.google.com/macros/s/AKfy-DEPLOY_1/exec"
+        def deploy(u):
+            return lambda root: (root / "clasp-projects.json").write_text(json.dumps({"url": u}))
+        for given, want in ((url, url), ("https://evil.example/exec", ""), (url + '";alert(1)//', ""), (None, "")):
+            tmp, page = build_fixture_page(deploy(given))
+            self.addCleanup(tmp.cleanup)
+            self.assertEqual(embedded(page, "PUBLISHED_URL"), want, given)
+        tmp, page = build_fixture_page()  # no deploy config: a local build
+        self.addCleanup(tmp.cleanup)
+        self.assertEqual(embedded(page, "PUBLISHED_URL"), "")
+        bad = build_fixture_page(lambda root: (root / "clasp-projects.json").write_text("{not json"))
+        self.addCleanup(bad[0].cleanup)
+        self.assertEqual(embedded(bad[1], "PUBLISHED_URL"), "")
 
 
 def counts(**over):

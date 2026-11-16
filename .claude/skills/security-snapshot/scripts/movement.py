@@ -450,7 +450,7 @@ def scan_gaps(curr):
                 running.append({"kind": "cluster", "name": f"{i['repo']} ({pl.get('platform') or 'unknown platform'})",
                                 "repo": i["repo"], "digest": pl.get("digest"),
                                 "status": c.get("status", "NOT_IN_COVERAGE"), "reason": c.get("reason"),
-                                "lapse_at": c.get("lapse_at")})
+                                "lapse_at": c.get("lapse_at"), "index_platform": True})
     not_scanned, lapsing = [], []
     for r in running:
         if r["status"] != "ACTIVE":

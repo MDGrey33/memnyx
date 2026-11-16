@@ -340,7 +340,8 @@ class TestPageRows(unittest.TestCase):
         self.assertEqual((v["push_days"], v["use_days"], v["mode"], v["soon_days"]), (30, 30, "LAST_IN_USE_AT", 14))
         rows = {r["name"]: r for r in v["not_scanned"]}
         self.assertEqual(rows["fn-1"], {"kind": "Lambda", "name": "fn-1", "image": "ns/l@" + "a" * 12,
-                                        "why": "rescanning lapsed", "lapse": "2026-08-01"})
+                                        "why": "rescanning lapsed: Lambda use does not count, only the push date",
+                                        "lapse": "2026-08-01"})
         self.assertEqual(rows["fn-2"]["why"], "Inspector has no record of this image")
         self.assertIn("could not be read", rows["ns/i"]["why"])
         unread = mp._scan_gaps({"scan_gaps": mv.scan_gaps(snap([], [{"function": "fn-3", "repo": None, "digest": None,
@@ -348,6 +349,29 @@ class TestPageRows(unittest.TestCase):
         self.assertEqual(unread["not_scanned"][0]["why"], "could not be read (ResourceNotFoundException)")
         self.assertEqual(unread["not_scanned"][0]["image"], "–")
         self.assertEqual(rows["ns/i"]["kind"], "Cluster")
+
+    def test_a_lapsing_row_says_why_it_lapses_not_inspectors_status(self):
+        soon = AT + timedelta(days=5)
+        g = mv.scan_gaps(snap(
+            [image("ns/run", D["a"], in_use=1, lapse=soon),
+             image("ns/i", D["idx"], in_use=1, index=True, platforms=[{"digest": D["amd"], "platform": "linux/amd64"}]),
+             image("ns/i", D["amd"], lapse=soon)],
+            [{"function": "fn-1", "repo": "ns/l", "digest": D["b"], "status": "ACTIVE",
+              "reason": "SUCCESSFUL", "lapse_at": soon.isoformat()}]))
+        rows = {r["name"]: r["why"] for r in mp._scan_gaps({"scan_gaps": g})["lapsing"]}
+        self.assertEqual(rows, {"fn-1": "Lambda use does not count, only the push date",
+                                "ns/i (linux/amd64)": "pods run the multi-architecture index, so only the push date counts",
+                                "ns/run": "rescanning follows the last time Inspector saw it running"})
+        self.assertNotIn("successful", json.dumps(rows))
+        # Any reason other than SUCCESSFUL still says something, so it stays.
+        g["lapsing"][0]["reason"] = "PENDING_INITIAL_SCAN"
+        first = mp._scan_gaps({"scan_gaps": g})["lapsing"][0]
+        self.assertTrue(first["why"].endswith(" (pending initial scan)"), first["why"])
+        g["lapsing"][0]["reason"] = "SUCCESSFUL"
+        # Rescanning by pull date credits pulls, so neither cause applies.
+        g["windows"] = {**W30, "mode": "LAST_PULL_DATE"}
+        pulled = {r["name"]: r["why"] for r in mp._scan_gaps({"scan_gaps": g})["lapsing"]}
+        self.assertEqual(set(pulled.values()), {"rescanning follows its push date or last pull"})
 
     def test_no_capture_no_panel(self):
         self.assertIsNone(mp._scan_gaps({"scan_gaps": None}))

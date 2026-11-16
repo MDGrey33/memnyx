@@ -518,15 +518,42 @@ def _days(window):
     return int(m.group(1)) if m else None
 
 
-def _gap_row(r):
+def _no_use_credit(r, mode):
+    """Why a running workload gets no credit for running, or None. Only the in-use
+    mode credits use; there, a Lambda never counts, and pods name a
+    multi-architecture index while Inspector scans the platform images under it."""
+    if mode != "LAST_IN_USE_AT":
+        return None
+    if r["kind"] == "lambda":
+        return "Lambda use does not count, only the push date"
+    if r.get("index_platform"):
+        return "pods run the multi-architecture index, so only the push date counts"
+    return None
+
+
+def _gap_why(r, mode):
+    status, cause = r.get("status"), _no_use_credit(r, mode)
+    if status == "NOT_IN_COVERAGE":
+        return "Inspector has no record of this image"
+    if status == "PLATFORMS_UNKNOWN":
+        return "multi-architecture image; its platform images could not be read"
+    if status == "UNREAD":
+        return f"could not be read ({r.get('reason')})"
+    if r.get("reason") == "SCAN_ELIGIBILITY_EXPIRED":
+        return "rescanning lapsed" + (f": {cause}" if cause else "")
+    if status == "ACTIVE":
+        # Still rescanned. SUCCESSFUL says nothing here; any other reason is kept.
+        why = cause or ("rescanning follows the last time Inspector saw it running" if mode == "LAST_IN_USE_AT"
+                        else "rescanning follows its push date or last pull")
+        reason = r.get("reason")
+        return why if not reason or reason == "SUCCESSFUL" else f"{why} ({reason.replace('_', ' ').lower()})"
+    return (r.get("reason") or status or "").replace("_", " ").lower()
+
+
+def _gap_row(r, mode=None):
     return {"kind": "Lambda" if r["kind"] == "lambda" else "Cluster", "name": r["name"],
             "image": (f"{r['repo']}@{(r.get('digest') or '').removeprefix('sha256:')[:12]}" if r.get("repo") else "–"),
-            "why": "Inspector has no record of this image" if r.get("status") == "NOT_IN_COVERAGE"
-                   else "multi-architecture image; its platform images could not be read"
-                   if r.get("status") == "PLATFORMS_UNKNOWN"
-                   else f"could not be read ({r.get('reason')})" if r.get("status") == "UNREAD"
-                   else "rescanning lapsed" if r.get("reason") == "SCAN_ELIGIBILITY_EXPIRED"
-                   else (r.get("reason") or r.get("status") or "").replace("_", " ").lower(),
+            "why": _gap_why(r, mode),
             "lapse": (r.get("lapse_at") or "")[:10] or None}
 
 
@@ -537,7 +564,8 @@ def _scan_gaps(mv):
     w = g.get("windows") or {}
     return {"running": g["running"], "soon_days": g["soon_days"], "functions_measured": g["functions_measured"],
             "push_days": _days(w.get("push")), "use_days": _days(w.get("use")), "mode": w.get("mode"),
-            "not_scanned": [_gap_row(r) for r in g["not_scanned"]], "lapsing": [_gap_row(r) for r in g["lapsing"]]}
+            "not_scanned": [_gap_row(r, w.get("mode")) for r in g["not_scanned"]],
+            "lapsing": [_gap_row(r, w.get("mode")) for r in g["lapsing"]]}
 
 
 def page_view(mv, detail, note_md="", allow=None):

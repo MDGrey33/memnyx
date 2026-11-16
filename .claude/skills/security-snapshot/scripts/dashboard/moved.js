@@ -142,7 +142,7 @@ function mvItem(it) {
 
 function mvLevers(levers) {
   if (!levers) return '';
-  return `<div class="mv-sec"><h2>What to fix next</h2>
+  return `${mvSecOpen('What to fix next')}
     <p class="mv-sec-lede">Ranked by today's critical + high naming the packages each change fixes. Some overlap: a finding can name more than one package, and a package can sit in a listed base layer.</p>
     <div class="mv-levers">${levers.map((l, i) => {
       const items = l.items.map(mvItem);
@@ -167,6 +167,12 @@ function mvGapRow(r, lapseLabel) {
     <div class="mv-num" data-lapse>${r.lapse ? esc(lapseLabel) + ' ' + esc(r.lapse) : 'no date'}</div><div class="mv-acts"></div></div>`;
 }
 
+// A What moved section: its heading carries the share link, its box the anchor.
+function mvSecOpen(title, attrs = '') {
+  const id = slugPanel(title);
+  return `<div class="mv-sec" data-panel="${id}"${attrs}><h2>${esc(title)}${panelLink(id)}</h2>`;
+}
+
 function mvScanGaps(g) {
   if (!g) return '';
   // A null window is LIFETIME (push) or not set (use).
@@ -174,27 +180,31 @@ function mvScanGaps(g) {
   const use = g.use_days == null ? '' : g.mode === 'LAST_IN_USE_AT'
     ? `, or ${esc(g.use_days)} days after it was last seen running on the cluster, whichever is later`
     : `, or ${esc(g.use_days)} days after it was last pulled, whichever is later`;
+  // "Running" here is what this panel sees; "in use" is what Inspector credits. Two
+  // running workloads earn no credit, which is how a running image stops being rescanned.
   const lambda = g.mode === 'LAST_IN_USE_AT' && g.push_days != null
-    ? ` A Lambda running an image does not count as use, so a container Lambda stops being rescanned ${esc(g.push_days)} days after its image was pushed.` : '';
+    ? ` Two kinds of running workload never count as use: a container Lambda, and a pod running a multi-architecture image (the pod names the index, and Inspector scans the platform images under it). Those stop being rescanned ${esc(g.push_days)} days after the image was pushed, however long they run.` : '';
   const rule = `Inspector rescans an image ${push}${use}.${lambda} After that, new CVEs never reach it. Images from outside this account's ECR, and Fargate pods, are not checked.`;
   const state = g.not_scanned.length ? 'gaps' : g.lapsing.length ? 'lapsing' : 'clear';
   const notScanned = g.not_scanned.length
-    ? `<h4 class="mv-chart-title">Running, not rescanned (${mvN(g.not_scanned.length)})</h4><div class="mv-list">${g.not_scanned.map(r => mvGapRow(r, 'lapsed')).join('')}</div>`
+    ? `<h4 class="mv-chart-title">Running, not rescanned (${mvN(g.not_scanned.length)})</h4>
+      <div class="mv-sub">Inspector is not rescanning these, or could not say: each row gives the reason. Where rescanning lapsed, new CVEs are not reported for it, and rebuilding and redeploying the image restarts it.</div><div class="mv-list">${g.not_scanned.map(r => mvGapRow(r, 'lapsed')).join('')}</div>`
     : '';
   const lapsing = g.lapsing.length
-    ? `<h4 class="mv-chart-title">Rescanning lapses within ${esc(g.soon_days)} days (${mvN(g.lapsing.length)})</h4><div class="mv-list">${g.lapsing.map(r => mvGapRow(r, 'lapses')).join('')}</div>`
+    ? `<h4 class="mv-chart-title">Rescanning lapses within ${esc(g.soon_days)} days (${mvN(g.lapsing.length)})</h4>
+      <div class="mv-sub">Still rescanned today. Rescanning stops on the date shown unless the image is rebuilt and redeployed first.</div><div class="mv-list">${g.lapsing.map(r => mvGapRow(r, 'lapses')).join('')}</div>`
     : '';
   const clear = state === 'clear'
     ? `<p class="mv-meta">All ${mvN(g.running)} running ${g.functions_measured ? 'images Inspector tracks' : 'cluster images Inspector tracks'} are being rescanned, and none lapses within ${esc(g.soon_days)} days.</p>` : '';
   const partial = g.functions_measured ? '' : '<p class="mv-meta">Container Lambdas could not be read this run, so only cluster images are checked.</p>';
-  return `<div class="mv-sec" data-gaps="${state}"><h2>Running but not scanned</h2>
+  return `${mvSecOpen('Running but not scanned', ` data-gaps="${state}"`)}
     <p class="mv-sec-lede">${rule}</p>
     <div class="card">${notScanned}${lapsing}${clear}${partial}</div></div>`;
 }
 
 function mvRepoMovers(repos) {
   if (!repos || !repos.length) return '';
-  return `<div class="mv-sec"><h2>Biggest moves by repo</h2>
+  return `${mvSecOpen('Biggest moves by repo')}
     <p class="mv-sec-lede">Change in critical + high since this basis. Click a bar to open the repo on GitHub.</p>
     <div class="card"><div style="height:${Math.max(160, repos.length * 30)}px"><canvas id="mvRepos"></canvas></div></div></div>`;
 }
@@ -224,7 +234,7 @@ function movedPanelHtml(date, basis) {
   }
   const v = e.view;
   return bar + mvVerdict(v.verdict) + mvWarnings(v.warnings) +
-    `<div class="mv-sec"><h2>Why it moved</h2>
+    `${mvSecOpen('Why it moved')}
       <p class="mv-sec-lede">The chart is built from the data and looks the same every time. What follows it is written for this snapshot.</p>
       ${v.note && v.note.lead ? `<div class="mv-lead">${v.note.lead}</div>` : ''}
       ${v.waterfall ? `<div class="card mv-gap-top"><h4 class="mv-chart-title">Critical + high by package, by what fixes them</h4>

@@ -13,6 +13,16 @@ const DARK = {backgroundColor:'#1e293b',borderColor:'#334155',borderWidth:1,
               titleColor:'#e2e8f0',bodyColor:'#94a3b8',padding:10,displayColors:false};
 
 // Parse YYYYMMDD slug into a Date.
+// A section's share-link id: a slug of its title. Only [a-z0-9-] survives, so an id
+// is inert in an attribute selector and an inline onclick, wherever it came from.
+function slugPanel(s) {
+  return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
+}
+function panelLink(id) {
+  const s = slugPanel(id);
+  return '<button type="button" class="panel-link" title="Copy a link to this section" onclick="sharePanel(\'' + s + '\')">🔗</button>';
+}
+
 function slugToDate(s){return new Date(s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8)+'T00:00:00Z')}
 
 // Format a delta block against an earlier snapshot ageDays before.

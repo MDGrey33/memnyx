@@ -64,6 +64,8 @@ function switchTab(btn, id, skipUrl) {
 // ── URL routing — shareable per-tab + per-snapshot links ──────────────────────
 // Hash format: #<tab>/<snapshot>   e.g.  #breakdown/20260525
 //              #moved/<snapshot>/<basis>  picks the comparison on the What moved tab
+//              …/<section>  a section's share link (a slug, never eight digits, so it
+//              cannot be read as a basis); followed once, then dropped by the next write
 // On Apps Script, the dashboard runs inside Google's sandbox iframe — direct
 // location.hash changes only affect the iframe URL, not the parent address bar.
 // google.script.history.push / google.script.url.getLocation bridge to the
@@ -80,17 +82,30 @@ function switchTabById(id, skipUrl) {
 function parseHash(raw) {
   const clean = (raw || '').replace(/^#/, '');
   if (!clean) return { tab: null, snap: null, basis: null };
-  const [t, s, b] = clean.split('/');
+  const [t, s, ...rest] = clean.split('/');
   const snap = (s && SNAPSHOTS[s]) ? s : null;
+  const b = rest.find(x => /^\d{8}$/.test(x));
+  const p = rest.find(x => x && !/^\d{8}$/.test(x));
   return {
     tab:   TAB_IDS.includes(t)        ? t : null,
     snap,
     basis: (snap && b && movedEntries(snap).some(e => e.basis === b)) ? b : null,
+    panel: slugPanel(p) || null,
   };
 }
 
-function urlWrite() {
-  const h = currentTab + '/' + activeDate + (currentTab === 'moved' && movedBasis ? '/' + movedBasis : '');
+function viewHash() {
+  return currentTab + '/' + activeDate + (currentTab === 'moved' && movedBasis ? '/' + movedBasis : '');
+}
+
+// The hash this page wrote last. Apps Script echoes a push back through the change
+// handler; applying our own write again would redraw the tab and re-scroll. It is
+// one-shot: consumed by its echo or by any navigation, so Back then Forward still
+// lands on the page the address names.
+let lastWritten = null;
+
+function writeHash(h) {
+  lastWritten = h;
   if (GAS && google.script.history) {
     google.script.history.push(null, null, h);
   } else if (location.hash !== '#'+h) {
@@ -98,12 +113,85 @@ function urlWrite() {
   }
 }
 
+function urlWrite() {
+  writeHash(viewHash());
+}
+
 function applyHash(rawHash) {
-  const { tab, snap, basis } = parseHash(rawHash);
+  const clean = (rawHash || '').replace(/^#/, '');
+  const echo = clean && clean === lastWritten;
+  lastWritten = null;
+  if (echo) return;
+  const { tab, snap, basis, panel } = parseHash(clean);
   if (snap && snap !== activeDate) loadDate(snap, true);
   // On the What moved tab the link decides the basis, including none (the default).
   if (tab === 'moved' && basis !== movedBasis) { movedBasis = basis; renderMoved(); }
   if (tab) switchTabById(tab, true);
+  if (tab && panel) scrollToPanel(panel);
+}
+
+// ── Section share links ───────────────────────────────────────────────────────
+// Every section heading carries a 🔗 (panelLink in core.js; build_dashboard.py adds
+// one to each card title). A click puts #<view>/<section> in the address bar and
+// copies the full link. On Apps Script the page runs in Google's sandbox iframe and
+// cannot read the parent address, so the link is built from PUBLISHED_URL, the
+// /exec URL the build reads from clasp-projects.json.
+// Jump, never glide: a smooth scroll started while the page is still drawing its
+// charts stopped short (measured: 22px of ~2,900). The flash shows where you landed.
+function scrollToPanel(raw) {
+  const id = slugPanel(raw);
+  const el = id && document.querySelector('[data-panel="' + id + '"]');
+  if (!el) return;
+  if (el.scrollIntoView) el.scrollIntoView({ block: 'start' });
+  el.classList.add('panel-flash');
+  setTimeout(() => el.classList.remove('panel-flash'), 1600);
+}
+
+function shareUrl(h) {
+  if (GAS) return PUBLISHED_URL ? PUBLISHED_URL + '#' + h : null;
+  return String(location.href || '').split('#')[0] + '#' + h;
+}
+
+// execCommand still copies inside a sandboxed iframe, where the Clipboard API can
+// be blocked by the frame's permissions policy.
+function legacyCopy(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(showToast.timer);
+  showToast.timer = setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+function sharePanel(id) {
+  const h = viewHash() + '/' + slugPanel(id);
+  writeHash(h);
+  scrollToPanel(id);
+  const url = shareUrl(h);
+  const fallback = () => showToast(url && legacyCopy(url) ? 'Link copied' : 'Copy the link from the address bar');
+  if (!url) return fallback();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(() => showToast('Link copied'), fallback);
+  } else {
+    fallback();
+  }
 }
 
 window.addEventListener('DOMContentLoaded', () => {

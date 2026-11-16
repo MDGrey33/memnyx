@@ -14,7 +14,7 @@ dom.document.querySelectorAll = sel => (sel === '.tab-pane' ? TABS.map(t => dom.
   : sel === '.tab-btn' ? TABS.map(t => dom.byId('btn-' + t)) : []);
 const ctx = vm.createContext({
   console, document: dom.document, window: dom.window, location: dom.location, history: dom.historyApi,
-  requestAnimationFrame: fn => fn(), setTimeout: fn => fn(), Chart: ChartStub, navigator: {},
+  requestAnimationFrame: fn => fn(), setTimeout: fn => fn(), clearTimeout() {}, Chart: ChartStub, navigator: {},
 });
 vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), ctx, { filename: 'page.js' });
 const run = src => vm.runInContext(src, ctx);

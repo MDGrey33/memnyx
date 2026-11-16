@@ -53,15 +53,16 @@ export class ChartStub {
 }
 
 // data: SNAPSHOTS, DATES, CURRENT_DATE, ORG, TREND_SERIES, ANNOTATIONS, MOVED, REGION, TREND_START, RANK_WEIGHTS.
-export function load(files, data = {}, dom = makeDom()) {
-  const ctx = vm.createContext({
+// globals: extra names in the page's scope, e.g. a `google` stub for the Apps Script paths.
+export function load(files, data = {}, dom = makeDom(), globals = {}) {
+  const ctx = vm.createContext({ ...globals,
     console, Math, JSON, Date, Number, String, Object, Array, Set, Map, RegExp, Intl,
     document: dom.document, window: dom.window, location: dom.location, history: dom.historyApi,
-    requestAnimationFrame: fn => fn(), setTimeout: fn => fn(), Chart: ChartStub,
+    requestAnimationFrame: fn => fn(), setTimeout: fn => fn(), clearTimeout() {}, Chart: ChartStub,
     navigator: { clipboard: { copied: [], writeText(t) { this.copied.push(t); return { then: fn => fn() }; } } },
   });
   const consts = Object.entries({
-    SNAPSHOTS: {}, DATES: [], CURRENT_DATE: null, ORG: 'org', TREND_SERIES: [], ANNOTATIONS: [], MOVED: {}, REGION: 'eu-west-2', TREND_START: '',
+    SNAPSHOTS: {}, DATES: [], CURRENT_DATE: null, ORG: 'org', PUBLISHED_URL: '', TREND_SERIES: [], ANNOTATIONS: [], MOVED: {}, REGION: 'eu-west-2', TREND_START: '',
     RANK_WEIGHTS: { insp_crit: 10, insp_high: 3, gh_crit: 50, gh_high: 15, code_scan: 5, secret: 100 },
     ...data,
   }).map(([k, v]) => `const ${k} = ${JSON.stringify(v)};`).join('\n');

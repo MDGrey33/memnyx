@@ -398,7 +398,7 @@ M = [  # (name, file, old, new, test that must fail)
  ('unrecorded platform read as scanned', 'scripts/movement.py', '                                "status": c.get("status", "NOT_IN_COVERAGE"), "reason": c.get("reason"),', '                                "status": c.get("status", "ACTIVE"), "reason": c.get("reason"),', 'test_scan_coverage.TestScanGaps.test_a_platform_inspector_never_recorded_is_not_scanned'),
  ('missing capture reads as all-clear', 'scripts/movement.py', '    if not isinstance(sc, dict) or not isinstance(sc.get("images"), list) or at is None:\n        return None', '    if not isinstance(sc, dict) or not isinstance(sc.get("images"), list) or at is None:\n        return {"running": 0, "not_scanned": [], "lapsing": []}', 'test_scan_coverage.TestScanGaps.test_absent_or_failed_capture_is_none_not_an_all_clear'),
  ('scan capture failure not flagged', 'scripts/movement.py', '"node_scan", "node_os", "scan_coverage"):', '"node_scan", "node_os"):', 'test_scan_coverage.TestScanGaps.test_failed_capture_is_flagged'),
- ('lapsed reason not worded', 'scripts/movement_page.py', '                   else "rescanning lapsed" if r.get("reason") == "SCAN_ELIGIBILITY_EXPIRED"', '                   else "rescanning lapsed" if False', 'test_scan_coverage.TestPageRows.test_rows_say_what_happened_in_words'),
+ ('lapsed reason not worded', 'scripts/movement_page.py', '    if r.get("reason") == "SCAN_ELIGIBILITY_EXPIRED":', '    if False:', 'test_scan_coverage.TestPageRows.test_rows_say_what_happened_in_words'),
  ('function names left public', 'scripts/fixture_mask.py', '    "raw.json:.scan_coverage.functions[].function": "FUNCTION",', '    "raw.json:.scan_coverage.functions[].function": "PUBLIC",', 'test_scan_coverage.TestMask.test_scan_coverage_identifiers_are_masked'),
  ('function names not searched for leaks', 'scripts/fixture_mask.py', ' | set(aliases.get("function", {})))', ')', 'test_scan_coverage.TestMask.test_a_leaked_function_name_is_caught'),
  ('gaps state never says gaps', 'scripts/dashboard/moved.js', "const state = g.not_scanned.length ? 'gaps' :", "const state = false ? 'gaps' :", 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
@@ -416,12 +416,31 @@ M = [  # (name, file, old, new, test that must fail)
  ('unknown host arch still filters', 'scripts/movement.py', '    if n.get("other_instances") and (not isinstance(others, list) or not others or None in others):', '    if False:', 'test_scan_coverage.TestScanGaps.test_non_bottlerocket_hosts_add_their_architecture'),
  ('other hosts arch ignored', 'scripts/movement.py', '[x.get("arch") for x in n["nodes"]] + (others or [])}', '[x.get("arch") for x in n["nodes"]]}', 'test_scan_coverage.TestScanGaps.test_non_bottlerocket_hosts_add_their_architecture'),
  ('Bottlerocket hosts counted as other', 'scripts/posture_snapshot.py', 'if img not in bottlerocket for a in archs},', 'if True for a in archs},', 'test_levers.TestNodeOs.test_records_the_architecture_of_hosts_that_are_not_bottlerocket'),
- ('unread row not worded', 'scripts/movement_page.py', 'if r.get("status") == "UNREAD"', 'if False', 'test_scan_coverage.TestPageRows.test_rows_say_what_happened_in_words'),
+ ('unread row not worded', 'scripts/movement_page.py', '    if status == "UNREAD":', '    if False:', 'test_scan_coverage.TestPageRows.test_rows_say_what_happened_in_words'),
  ('LIFETIME renders as blank days', 'scripts/dashboard/moved.js', 'const push = g.push_days == null ?', 'const push = false ?', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
  ('all-clear claims unread Lambdas', 'scripts/dashboard/moved.js', "${g.functions_measured ? 'images Inspector tracks'", "${true ? 'images Inspector tracks'", 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
  ('Lambda sentence without a push window', 'scripts/dashboard/moved.js', "const lambda = g.mode === 'LAST_IN_USE_AT' && g.push_days != null", "const lambda = g.mode === 'LAST_IN_USE_AT'", 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'), ('cross-repo copy chosen by listing order', 'scripts/posture_snapshot.py', '               key=lambda x: (x["status"] == "ACTIVE", x["lapse_at"] or ""), default=None)', '               key=lambda x: 0, default=None)', 'test_scan_coverage.TestScanCoverage.test_a_digest_in_two_repos_takes_the_copy_still_rescanned'),
  ('empty other_archs still filters', 'scripts/movement.py', '(not isinstance(others, list) or not others or None in others):', '(not isinstance(others, list) or None in others):', 'test_scan_coverage.TestScanGaps.test_non_bottlerocket_hosts_add_their_architecture'),
  ('unread image shown as ?@', 'scripts/movement_page.py', 'if r.get("repo") else "–"),', 'if r.get("repo") else "?@"),', 'test_scan_coverage.TestPageRows.test_rows_say_what_happened_in_words'),
+ ("lapsing row shows Inspector's status", 'scripts/movement_page.py', '        why = cause or ("rescanning follows', '        why = (r.get("reason") or "").lower() or ("rescanning follows', 'test_scan_coverage.TestPageRows.test_a_lapsing_row_says_why_it_lapses_not_inspectors_status'),
+ ('platform rows get no cause', 'scripts/movement.py', '"lapse_at": c.get("lapse_at"), "index_platform": True})', '"lapse_at": c.get("lapse_at")})', 'test_scan_coverage.TestPageRows.test_a_lapsing_row_says_why_it_lapses_not_inspectors_status'),
+ ('no-credit cause claimed in pull mode', 'scripts/movement_page.py', '    if mode != "LAST_IN_USE_AT":\n        return None\n    if r["kind"]', '    if r["kind"]', 'test_scan_coverage.TestPageRows.test_a_lapsing_row_says_why_it_lapses_not_inspectors_status'),
+ ('lapsed row loses its cause', 'scripts/movement_page.py', '        return "rescanning lapsed" + (f": {cause}" if cause else "")', '        return "rescanning lapsed"', 'test_scan_coverage.TestPageRows.test_rows_say_what_happened_in_words'),
+ ('echo of our own write redraws', 'scripts/dashboard/app.js', '  if (echo) return;\n', '', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('Apps Script link built on the sandbox frame', 'scripts/dashboard/app.js', "  if (GAS) return PUBLISHED_URL ? PUBLISHED_URL + '#' + h : null;\n", '', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('section id from the address used raw', 'scripts/dashboard/app.js', '    panel: slugPanel(p) || null,', '    panel: p || null,', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('a basis read as a section', 'scripts/dashboard/app.js', '  const p = rest.find(x => x && !/^\\d{8}$/.test(x));', '  const p = rest.find(x => x);', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('a section link never scrolls', 'scripts/dashboard/app.js', '  if (tab && panel) scrollToPanel(panel);', '', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('section link drops the basis', 'scripts/dashboard/app.js', "  const h = viewHash() + '/' + slugPanel(id);", "  const h = currentTab + '/' + activeDate + '/' + slugPanel(id);", 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('share button id not slugged', 'scripts/dashboard/core.js', '  const s = slugPanel(id);', '  const s = id;', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('What moved sections lose their anchor', 'scripts/dashboard/moved.js', '<div class="mv-sec" data-panel="${id}"${attrs}>', '<div class="mv-sec"${attrs}>', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('lists lose their meaning line', 'scripts/dashboard/moved.js', '<div class="mv-sub">Still rescanned today.', '<div class="mv-sub">', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('duplicate card slugs allowed', 'scripts/build_dashboard.py', '        if not sid or sid in seen or re.fullmatch', '        if not sid or re.fullmatch', 'test_dashboard_js.TestSectionLinks.test_two_cards_with_one_slug_stop_the_build'),
+ ('any URL becomes the link base', 'scripts/build_dashboard.py', '    return url if isinstance(url, str) and re.fullmatch(', '    return url if isinstance(url, str) or re.fullmatch(', 'test_dashboard_js.TestSectionLinks.test_the_published_url_comes_from_the_deploy_config_and_only_if_it_is_apps_script'),
+ ('section scroll glides and stops short', 'scripts/dashboard/app.js', "el.scrollIntoView({ block: 'start' });", "el.scrollIntoView({ behavior: 'smooth', block: 'start' });", 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('echo guard never reset', 'scripts/dashboard/app.js', '  lastWritten = null;\n  if (echo) return;', '  if (echo) return;', 'test_dashboard_js.TestNodeSuite.test_node_tests_pass'),
+ ('ACTIVE reasons all hidden', 'scripts/movement_page.py', '        return why if not reason or reason == "SUCCESSFUL" else', '        return why if True else', 'test_scan_coverage.TestPageRows.test_a_lapsing_row_says_why_it_lapses_not_inspectors_status'),
+ ('card titles get no link', 'scripts/build_dashboard.py', '    return fill_placeholders(panel_links(HTML), subs)', '    return fill_placeholders(HTML, subs)', 'test_dashboard_js.TestSectionLinks.test_every_card_title_is_an_anchor_with_a_share_link'),
 ]
 
 
@@ -431,6 +450,10 @@ M = [  # (name, file, old, new, test that must fail)
 
 
 
+# A test id that cannot load also exits non-zero, which reads as a kill; refuse one.
+import re
+assert all(re.fullmatch(r"test_\w+\.Test\w+\.test_\w+", m[4]) for m in M), \
+    [m[0] for m in M if not re.fullmatch(r"test_\w+\.Test\w+\.test_\w+", m[4])]
 env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
 bad = 0
 for name, f, old, new, test in M:

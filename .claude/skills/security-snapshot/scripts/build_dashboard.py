@@ -475,6 +475,11 @@ button.mv-stat-block{font-family:inherit;text-align:left;cursor:pointer;width:10
 .mv-stat-go{font-size:11px;color:#7fb0ff;margin-top:8px}
 .mv-md h3{scroll-margin-top:16px;border-radius:6px;transition:background .3s,box-shadow .3s}
 .mv-md h3.mv-flash{background:#146bfa26;box-shadow:0 0 0 6px #146bfa26}
+.panel-link{margin-left:8px;background:none;border:none;cursor:pointer;font-size:12px;line-height:1;opacity:.45;transition:opacity .15s;padding:0;vertical-align:middle}
+.panel-link:hover,.panel-link:focus-visible{opacity:1}
+.panel-flash{box-shadow:0 0 0 2px var(--primary);border-radius:8px;transition:box-shadow .3s}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--primary);color:var(--text);padding:10px 18px;border-radius:6px;font-size:12px;z-index:9999;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
 .mv-chart-block h4,.mv-chart-title{font-size:14px;font-weight:600;margin-bottom:2px}
 .mv-callout{border:1px solid var(--border);border-left:4px solid var(--tone);background:var(--surface);border-radius:10px;padding:12px 16px}
 .mv-callout b{display:block;color:var(--tone);font-size:13.5px;margin-bottom:4px}
@@ -594,6 +599,7 @@ button.mv-stat-block{font-family:inherit;text-align:left;cursor:pointer;width:10
 </div><!-- /tab-trend -->
 
 </div><!-- /page -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script>
 const SNAPSHOTS    = __SNAPSHOTS__;
 const DATES        = __DATES__;
@@ -605,6 +611,7 @@ const RANK_WEIGHTS = __RANK_WEIGHTS__;
 const MOVED        = __MOVED__;
 const REGION       = __REGION__;
 const TREND_START  = __TREND_START__;
+const PUBLISHED_URL = __PUBLISHED_URL__;
 __APP_JS__
 </script>
 </body>
@@ -644,12 +651,45 @@ def build(corr_path: Path, reports_dir: Path) -> str:
         "__MOVED__":        js_literal(moved),
         "__REGION__":       js_literal(REGION),
         "__TREND_START__":  js_literal(TREND_START if re.fullmatch(r"\d{8}", TREND_START) else ""),
+        "__PUBLISHED_URL__": js_literal(published_url(reports_dir)),
         "'__ORG__'":        js_literal(ORG),
         "__TITLE__":        html_escape(TITLE),
         "__ORG_ACCOUNT__":  html_escape(header),
         "__APP_JS__":       page_js(),
     }
-    return fill_placeholders(HTML, subs)
+    return fill_placeholders(panel_links(HTML), subs)
+
+
+def slug_panel(title):
+    """core.js slugPanel(), for the card titles written into the page itself."""
+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48]
+
+
+def panel_links(template):
+    """Give every card title an anchor and a share link. Runs on the template, before
+    any data goes in, so only titles written here get one. Two cards with one slug
+    would share a link, so that stops the build."""
+    seen = set()
+
+    def link(m):
+        sid = slug_panel(m.group(1))
+        if not sid or sid in seen or re.fullmatch(r"\d{8}", sid):
+            raise ValueError(f"card title {m.group(1)!r} gives no unique section id ({sid!r})")
+        seen.add(sid)
+        return (f'<div class="card-title" data-panel="{sid}">{m.group(1)}<button type="button" class="panel-link" '
+                f'title="Copy a link to this section" onclick="sharePanel(\'{sid}\')">🔗</button></div>')
+    return re.sub(r'<div class="card-title">([^<]*)</div>', link, template)
+
+
+def published_url(reports_dir):
+    """The deployed /exec URL from clasp-projects.json, or "" (a local build, or no
+    usable deploy config). Only an Apps Script URL is accepted: it becomes the base
+    of every copied link."""
+    try:
+        url = json.loads((Path(reports_dir) / "clasp-projects.json").read_text()).get("url") or ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return url if isinstance(url, str) and re.fullmatch(r"https://script\.google\.com/macros/s/[\w-]+/exec", url) else ""
 
 
 JS_DIR = Path(__file__).resolve().parent / "dashboard"

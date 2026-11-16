@@ -223,7 +223,14 @@ using its image, so a container Lambda lapses one push window after its image wa
 pods name a multi-architecture image by its index, which Inspector cannot scan, while the
 platform images it does scan never count as running; the panel judges such an image by the
 platforms the cluster's hosts run, or by all of them when any host's architecture is unknown.
-It does not see images pulled from outside this account's ECR, or Fargate pods. `trend_start` in config sets where the trend line begins. The page's JavaScript lives
+It does not see images pulled from outside this account's ECR, or Fargate pods. Each row says
+why it lapses: a Lambda, a platform image under a running index, or the last use Inspector
+recorded (the push date or last pull when the account rescans by pull date). `trend_start` in config sets where the trend line begins.
+
+Every section heading carries a 🔗 that copies a link to that section (`#<tab>/<snapshot>[/<basis>]/<section>`).
+On Apps Script the page cannot read its own address, so the build takes the link's base from
+the `url` in `clasp-projects.json`; without one the link goes to the address bar only. A first
+deploy creates that file after the build, so build and deploy once more after first setup. The page's JavaScript lives
 in `scripts/dashboard/` and is inlined at build, so the page stays one file.
 
 ---

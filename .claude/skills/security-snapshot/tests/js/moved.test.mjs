@@ -78,8 +78,11 @@ test('opens on the previous-snapshot comparison: verdict, factors, warnings, not
   assert.match(h, /ECR images hold 97,474 → 24,054 of the total: images with findings × critical \+ high\s+per image\. The rest is EC2 and Lambda\./);
   assert.match(h, /Ranked by today's critical \+ high naming the packages each change fixes\. Some overlap: a finding can name more than one package/);
   assert.doesNotMatch(h, /is the remediation|without fixing anything/);
-  for (const s of ['Why it moved', 'What to fix next', 'Biggest moves by repo']) assert.match(h, new RegExp(`<h2>${s}</h2>`));
-  assert.doesNotMatch(h, /<h2>(Where it moved|Checks|GitHub)<\/h2>/);
+  for (const s of ['Why it moved', 'What to fix next', 'Biggest moves by repo']) {
+    const id = s.toLowerCase().replaceAll(' ', '-');
+    assert.match(h, new RegExp(`<div class="mv-sec" data-panel="${id}"><h2>${s}<button [^>]*onclick="sharePanel\\('${id}'\\)">🔗</button></h2>`));
+  }
+  assert.doesNotMatch(h, /<h2>(Where it moved|Checks|GitHub)</);
 });
 
 test('the 30-day basis shows its own verdict and says no note is written', () => {
@@ -338,9 +341,96 @@ test('changing snapshot resets the basis', () => {
 test('parseHash accepts a basis only when that snapshot has it', () => {
   const { run } = page();
   assert.equal(run("JSON.stringify(parseHash('#moved/20261021/20260909'))"),
-               JSON.stringify({ tab: 'moved', snap: '20261021', basis: '20260909' }));
+               JSON.stringify({ tab: 'moved', snap: '20261021', basis: '20260909', panel: null }));
   assert.equal(run("parseHash('#moved/20261007/20260909').basis"), null);
   assert.equal(run("parseHash('#moved/20991231/20260909').snap"), null);
+});
+
+// ── Section share links ─────────────────────────────────────────────────────
+// A DOM whose querySelector finds one [data-panel] element, so a scroll can be seen.
+function panelDom(dom) {
+  const found = dom.byId('found-panel'), asked = [];
+  found.scrolls = [];
+  found.scrollIntoView = o => found.scrolls.push(o);
+  const tabs = dom.document.querySelector;
+  dom.document.querySelector = sel => (asked.push(sel), sel.startsWith('[data-panel=') ? found : tabs(sel));
+  return { found, asked };
+}
+
+test('a section link carries the view and the section, and a link to it lands there', () => {
+  const p = page();
+  p.dom.location.href = 'file:///reports/security-dashboard.html#moved/20261021';
+  const { found, asked } = panelDom(p.dom);
+  p.run("selectMovedBasis('20260909'); sharePanel('running-but-not-scanned')");
+  const h = 'moved/20261021/20260909/running-but-not-scanned';
+  assert.equal(p.dom.history.replaced.at(-1), '#' + h);
+  assert.deepEqual(p.run('navigator.clipboard.copied'), ['file:///reports/security-dashboard.html#' + h]);
+  assert.equal(p.dom.els.toast.textContent, 'Link copied');
+  assert.ok(asked.includes('[data-panel="running-but-not-scanned"]'));
+  assert.equal(JSON.stringify(found.scrolls), '[{"block":"start"}]');
+  assert.deepEqual(JSON.parse(p.run(`JSON.stringify(parseHash('#${h}'))`)),
+                   { tab: 'moved', snap: '20261021', basis: '20260909', panel: 'running-but-not-scanned' });
+  // Opening the link elsewhere: right snapshot, basis and tab, then the section.
+  const q = page(), r = panelDom(q.dom);
+  q.run(`switchTab(document.getElementById('btn-trend'), 'trend'); applyHash('#${h}')`);
+  assert.equal(q.run('currentTab + movedBasis'), 'moved20260909');
+  assert.ok(r.asked.includes('[data-panel="running-but-not-scanned"]'));
+  assert.equal(JSON.stringify(r.found.scrolls), '[{"block":"start"}]');  // a smooth scroll stops short of the section
+  // Any later move drops the section: the address names the view again.
+  q.run("switchTab(document.getElementById('btn-breakdown'), 'breakdown')");
+  assert.equal(q.dom.history.replaced.at(-1), '#breakdown/20261021');
+});
+
+test('a section id from the address is reduced to a slug before it reaches a selector', () => {
+  const { run } = page();
+  assert.equal(run(`parseHash('#trend/20261021/x"]<b>').panel`), 'x-b');
+  assert.equal(run("parseHash('#moved/20261021/20260909').panel"), null);  // eight digits are a basis
+  assert.equal(run("parseHash('#moved/20261021/what-to-fix-next').basis"), null);
+  assert.equal(run("panelLink('a\\'); alert(1)//')"),
+               '<button type="button" class="panel-link" title="Copy a link to this section" onclick="sharePanel(\'a-alert-1\')">🔗</button>');
+});
+
+test('our own address write echoed back by Apps Script does not redraw the tab', () => {
+  const { run, dom } = page();
+  run("sharePanel('what-to-fix-next')");
+  dom.byId('movedPanel').innerHTML = 'UNTOUCHED';
+  run("applyHash('#moved/20261021/what-to-fix-next')");
+  assert.equal(dom.els.movedPanel.innerHTML, 'UNTOUCHED');
+  run("applyHash('#moved/20261021/20260909')");  // a real navigation still applies
+  assert.notEqual(dom.els.movedPanel.innerHTML, 'UNTOUCHED');
+});
+
+test('Back then Forward lands on the page the address names', () => {
+  const { run } = page();
+  run("switchTab(document.getElementById('btn-trend'), 'trend')");
+  run("switchTab(document.getElementById('btn-breakdown'), 'breakdown')");
+  run("applyHash('#trend/20261021')");      // Back
+  assert.equal(run('currentTab'), 'trend');
+  run("applyHash('#breakdown/20261021')");  // Forward, to the hash this page wrote last
+  assert.equal(run('currentTab'), 'breakdown');
+});
+
+function gasPage(publishedUrl) {
+  const pushed = [];
+  const google = { script: { url: { getLocation() {} },
+    history: { push: (_s, _t, h) => pushed.push(h), setChangeHandler() {} } } };
+  const p = load(FILES, { SNAPSHOTS: Object.fromEntries(DATES.map(d => [d, snapshot()])), DATES, CURRENT_DATE: '20261021',
+                          MOVED, TREND_SERIES: TREND, ORG: 'example-org', PUBLISHED_URL: publishedUrl }, undefined, { google });
+  return { ...p, pushed };
+}
+
+test('on Apps Script the link is built on the published URL, never the sandbox frame', () => {
+  const g = gasPage('https://script.google.com/macros/s/DEPLOY/exec');
+  g.dom.location.href = 'https://n-abc-script.googleusercontent.com/userCodeAppPanel';
+  g.run("sharePanel('biggest-moves-by-repo')");
+  assert.deepEqual(g.pushed, ['moved/20261021/biggest-moves-by-repo']);
+  assert.deepEqual(g.run('navigator.clipboard.copied'), ['https://script.google.com/macros/s/DEPLOY/exec#moved/20261021/biggest-moves-by-repo']);
+  // Without a published URL there is nothing true to copy: say where the link is.
+  const bare = gasPage('');
+  bare.run("sharePanel('biggest-moves-by-repo')");
+  assert.deepEqual(bare.pushed, ['moved/20261021/biggest-moves-by-repo']);
+  assert.deepEqual(bare.run('navigator.clipboard.copied'), []);
+  assert.equal(bare.dom.els.toast.textContent, 'Copy the link from the address bar');
 });
 
 test('the basis button passes its value from data-basis, never inside the onclick string', () => {
@@ -382,14 +472,18 @@ test('running but not scanned: each state is keyed in data-gaps and lists its ro
   const { run } = page();
   const gaps = g => run(`mvScanGaps(${JSON.stringify(g)})`);
   const bad = gaps(GAPS({ not_scanned: [gapRow('fn-01', 'Lambda', 'rescanning lapsed', '2026-08-01')],
-                          lapsing: [gapRow('fn-02', 'Lambda', 'successful', '2026-11-25')] }));
+                          lapsing: [gapRow('fn-02', 'Lambda', 'Lambda use does not count', '2026-11-25')] }));
   assert.match(bad, /data-gaps="gaps"/);
   assert.match(bad, /Running, not rescanned \(1\)[\s\S]*fn-01[\s\S]*<div class="mv-num" data-lapse>lapsed 2026-08-01</);
   assert.match(bad, /Rescanning lapses within 14 days \(1\)[\s\S]*fn-02[\s\S]*data-lapse>lapses 2026-11-25</);
-  assert.match(bad, /a container Lambda stops being rescanned 30 days after its image was pushed/);
-  const soon = gaps(GAPS({ lapsing: [gapRow('fn-02', 'Lambda', 'successful', '2026-11-25')] }));
+  assert.match(bad, /never count as use: a container Lambda, and a pod running a multi-architecture image/);
+  assert.match(bad, /stop being rescanned 30 days after the image was pushed, however long they run/);
+  // Each list says what its state means, under its own heading.
+  assert.match(bad, /Running, not rescanned \(1\)<\/h4>\s*<div class="mv-sub">Inspector is not rescanning these, or could not say/);
+  assert.match(bad, /within 14 days \(1\)<\/h4>\s*<div class="mv-sub">Still rescanned today/);
+  const soon = gaps(GAPS({ lapsing: [gapRow('fn-02', 'Lambda', 'Lambda use does not count', '2026-11-25')] }));
   assert.match(soon, /data-gaps="lapsing"/);
-  assert.doesNotMatch(soon, /Running, not rescanned/);
+  assert.doesNotMatch(soon, /Running, not rescanned|already stopped/);
   assert.doesNotMatch(soon, /are being rescanned/);  // lapsing rows are not an all-clear
   const clear = gaps(GAPS());
   assert.match(clear, /data-gaps="clear"/);
@@ -399,11 +493,13 @@ test('running but not scanned: each state is keyed in data-gaps and lists its ro
   assert.match(noLambdas, /All 130 running cluster images Inspector tracks/);  // never claims the Lambdas are clear
   const life = gaps(GAPS({ push_days: null }));
   assert.match(life, /rescans an image for as long as it exists after it is pushed, or 30 days/);
-  assert.doesNotMatch(life, /for  days|stops being rescanned/);
+  assert.doesNotMatch(life, /for  days|stops? being rescanned/);
   assert.doesNotMatch(gaps(GAPS({ use_days: null })), /whichever is later/);
   assert.match(clear, /Fargate pods, are not checked/);
   assert.doesNotMatch(clear, /could not be read/);
-  assert.match(gaps(GAPS({ mode: 'LAST_PULL_DATE' })), /after it was last pulled/);
+  const pulled = gaps(GAPS({ mode: 'LAST_PULL_DATE' }));
+  assert.match(pulled, /after it was last pulled/);
+  assert.doesNotMatch(pulled, /never count as use/);  // pull mode credits pulls
   assert.equal(gaps(null), '');
   const esc = gaps(GAPS({ not_scanned: [gapRow('<b>x</b>', 'Lambda', '<i>y</i>', null)] }));
   assert.match(esc, /&lt;b&gt;x&lt;\/b&gt;[\s\S]*&lt;i&gt;y&lt;\/i&gt;[\s\S]*data-lapse>no date</);
