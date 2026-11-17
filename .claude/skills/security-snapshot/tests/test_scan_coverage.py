@@ -487,6 +487,24 @@ class TestMask(unittest.TestCase):
         self.assertEqual(fm.find_leaks(masked, aliases), [])
         self.assertNotIn("BillingPresignup", json.dumps(masked))
 
+    def test_every_field_the_capture_writes_has_a_mask_rule(self):
+        # From the capture itself, not a hand-written row, so a field added to it
+        # fails here rather than at the next fixture regeneration. Every row shape:
+        # covered, never covered, an alias, unread, and an index with platforms.
+        man = {"manifests": [{"digest": D["amd"], "platform": {"os": "linux", "architecture": "amd64"}}]}
+        inspector = Inspector([[cov("ns/a", D["a"]), cov("ns/i", D["idx"], in_use=1), cov("ns/i", D["amd"])]])
+        ecr = Ecr([detail("ns/a", D["a"], pulled=T0), detail("ns/i", D["idx"], media=INDEX), detail("ns/i", D["amd"])],
+                  manifests={D["idx"]: man})
+        lam = Lambda([("fn-a", "Image", uri("ns/a", D["a"])), ("fn-x", "Image", uri("ns/x", D["b"])),
+                      ("gone", "Image", uri("ns/a", D["a"]))],
+                     aliases={"fn-a": [("live", "3")]}, versions={("fn-a", "3"): uri("ns/a", D["a"])}, deny=("gone",))
+        with mock.patch("sys.stderr"):
+            sc = ps.scan_coverage(inspector, ecr, lam)
+        self.assertEqual({f["status"] for f in sc["functions"]}, {"ACTIVE", "NOT_IN_COVERAGE", "UNREAD"})
+        self.assertTrue(any(i["platforms"] for i in sc["images"]))
+        masked, aliases = fm.mask_set({"20260101": {"raw.json": {"scan_coverage": sc}}})  # raises on an unknown field
+        self.assertEqual(fm.find_leaks(masked, aliases), [])
+
     def test_a_leaked_function_name_is_caught(self):
         raw = {"scan_coverage": {"functions": [{"function": "BillingPresignup"}], "status": "BillingPresignup"}}
         masked, aliases = fm.mask_set({"20260101": {"raw.json": raw}})

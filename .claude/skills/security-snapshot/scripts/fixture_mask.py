@@ -111,6 +111,8 @@ FIELD_ROLES = {
     "raw.json:.scan_coverage.functions[].status": "PUBLIC",
     "raw.json:.scan_coverage.functions[].reason": "PUBLIC",
     "raw.json:.scan_coverage.functions[].lapse_at": "PUBLIC",
+    "raw.json:.scan_coverage.functions[].pushed_at": "PUBLIC",
+    "raw.json:.scan_coverage.functions[].last_pulled_at": "PUBLIC",
     # github-raw.json
     "github-raw.json:.org": "ORG",
     "github-raw.json:.vuln_agg.top_repos[].repo": "REPO",
