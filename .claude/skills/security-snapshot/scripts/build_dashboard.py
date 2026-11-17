@@ -17,8 +17,9 @@ Output: security-dashboard.html — single file, all snapshot data embedded
 """
 import argparse
 import json
-import os
+import re
 import sys
+from html import escape as html_escape
 from collections import defaultdict
 from pathlib import Path
 
@@ -28,6 +29,13 @@ from config_util import (
     require as _require,
     resolve_reports_dir as _resolve_reports_dir,
 )
+from movement_page import build_moved
+from correlation import (CONVERGENCE_TOP_N, W_CODE_SCAN, W_GH_CRIT, W_GH_HIGH, W_INSP_CRIT,
+                         W_INSP_HIGH, W_SECRET)
+
+# The combined repo ranking's weights, as correlation.py scores it; the chart labels read these.
+RANK_WEIGHTS = {"insp_crit": W_INSP_CRIT, "insp_high": W_INSP_HIGH, "gh_crit": W_GH_CRIT,
+                "gh_high": W_GH_HIGH, "code_scan": W_CODE_SCAN, "secret": W_SECRET}
 
 _CFG  = _load_config()
 ORG   = _require(_CFG, "github_org")
@@ -37,6 +45,9 @@ TITLE = (_CFG.get("dashboard_title") or "").strip() or "Security Dashboard"
 # Maintained in config.json ("annotations") — add an entry whenever a
 # significant remediation action or disclosure lands.
 ANNOTATIONS = _CFG.get("annotations") or []
+REGION      = (_CFG.get("aws_region") or "").strip()
+# First snapshot the What moved trend line shows (YYYYMMDD); empty shows all.
+TREND_START = (_CFG.get("trend_start") or "").strip()
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
@@ -108,25 +119,6 @@ def extract(corr_path: Path, reports_dir: Path) -> dict:
     sev_high     = _vuln_high     + _code_errors
     sev_medium   = _vuln_mod      + _code_warn
     sev_low      = max(_vuln_total - _vuln_critical - _vuln_high - _vuln_mod, 0)
-
-    EFFORT_COLOR = {"Trivial":"#22c55e","Bounded":"#3b82f6","Phantom":"#64748b","Structural":"#a855f7"}
-    qw_chart = [
-        {
-            "pkg":   p["package"][:30],
-            "effort": p["effort"],
-            "label":  p["effort_label"],
-            "x": p["effort"],
-            "y": p["combined_ch"],
-            "r": min(35, max(6, (p["quickwin_score"] / 15000) ** 0.5 * 20)),
-            "repos":    p["gh_repos"],
-            "insp_ch":  p["insp_crit"] + p["insp_high"],
-            "gh_ch":    p["gh_crit"]   + p["gh_high"],
-            "fix":   p["fix_available"],
-            "score": p["quickwin_score"],
-            "color": EFFORT_COLOR.get(p["effort_label"], "#94a3b8"),
-        }
-        for p in corr.get("package_quickwin", [])[:40]
-    ]
 
     insp_repos = sorted(
         insp_raw.get("repositories", []),
@@ -200,7 +192,6 @@ def extract(corr_path: Path, reports_dir: Path) -> dict:
             "zone_c":        zone_s.get("cves_github_only",     0),
             "convergence":   corr.get("offender_convergence",   []),
             "repo_ranking":  corr.get("repo_combined_ranking",  [])[:20],
-            "pkg_quickwin":  qw_chart,
         },
     }
 
@@ -227,7 +218,10 @@ def load_all_snapshots(reports_dir: Path) -> dict:
     result = {}
     for f in sorted(reports_dir.glob("*/snapshot.json"),
                     key=lambda p: p.parent.name):
-        result[f.parent.name] = json.loads(f.read_text())
+        # Only dated folders: the folder name becomes a key the page puts in
+        # HTML attributes and JS strings.
+        if re.fullmatch(r"\d{8}", f.parent.name):
+            result[f.parent.name] = json.loads(f.read_text())
     return result
 
 def build_trend_series(all_snaps: dict) -> list:
@@ -266,6 +260,7 @@ def build_trend_series(all_snaps: dict) -> list:
             "date":            date,
             "insp_crit":       insp.get("critical",    0),
             "insp_high":       insp.get("high",        0),
+            "insp_ch":         insp.get("critical", 0) + insp.get("high", 0),
             "unique_cves":     insp.get("unique_cves", 0),
             "gh_vuln":         gh_vuln_total,
             "gh_code":         gh_code_total,
@@ -290,7 +285,7 @@ HTML = r"""<!DOCTYPE html>
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>__TITLE__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <style>
@@ -299,7 +294,6 @@ HTML = r"""<!DOCTYPE html>
   --bg:#0f172a;--surface:#1e293b;--surface2:#253047;--border:#334155;
   --text:#e2e8f0;--muted:#94a3b8;--primary:#146bfa;
   --crit:#ef4444;--high:#f97316;--med:#eab308;--low:#22c55e;
-  --trivial:#22c55e;--bounded:#3b82f6;--structural:#a855f7;--phantom:#64748b;
 }
 body{font-family:'Roboto',sans-serif;background:var(--bg);color:var(--text);font-size:13px;line-height:1.5}
 .page{max-width:1440px;margin:0 auto;padding:24px 20px}
@@ -310,10 +304,6 @@ body{font-family:'Roboto',sans-serif;background:var(--bg);color:var(--text);font
 .badge-conf{background:#dc262633;color:#fca5a5;border:1px solid #dc262666;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:500;white-space:nowrap}
 /* Date picker */
 .date-row{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap}
-.date-label{font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.06em}
-.date-chip{padding:4px 11px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:500;border:1px solid var(--border);background:var(--surface2);color:var(--muted);transition:all .15s;font-family:inherit}
-.date-chip:hover{border-color:var(--primary);color:var(--text)}
-.date-chip.active{background:var(--primary);border-color:var(--primary);color:#fff}
 /* Tabs */
 .tab-nav{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:20px}
 .tab-btn{padding:10px 22px;cursor:pointer;color:var(--muted);border:none;background:transparent;font-family:inherit;font-size:13px;font-weight:500;border-bottom:2px solid transparent;transition:color .15s,border-color .15s}
@@ -323,15 +313,14 @@ body{font-family:'Roboto',sans-serif;background:var(--bg);color:var(--text);font
 /* Cards & grids */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:16px}
 .card-title{font-size:14px;font-weight:600;color:var(--primary);margin-bottom:12px}
-.grid-5{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
 .grid-6{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:20px}
 .grid-2{display:grid;gap:16px;margin-bottom:20px}
 .grid-2-6{grid-template-columns:2fr 1fr}
 .grid-2-eq{grid-template-columns:1fr 1fr}
 .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px}
 @media(max-width:1300px){.grid-6{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:1100px){.grid-5{grid-template-columns:repeat(3,1fr)}.grid-2-6,.grid-2-eq{grid-template-columns:1fr}.grid-3{grid-template-columns:1fr 1fr}}
-@media(max-width:640px){.grid-5,.grid-6,.grid-3{grid-template-columns:1fr}}
+@media(max-width:1100px){.grid-2-6,.grid-2-eq{grid-template-columns:1fr}.grid-3{grid-template-columns:1fr 1fr}}
+@media(max-width:640px){.grid-6,.grid-3{grid-template-columns:1fr}}
 /* KPIs */
 .kpi-label{font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
 .kpi-val{font-size:26px;font-weight:700;line-height:1.1}
@@ -359,22 +348,7 @@ tbody td{padding:8px 10px;vertical-align:middle}
 .zone-val{font-size:32px;font-weight:700;margin:6px 0}
 .zone-lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .zone-desc{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
-/* Exec summary */
-.exec-col{display:grid;grid-template-columns:1fr 1fr;gap:24px}
-@media(max-width:900px){.exec-col{grid-template-columns:1fr}}
-.exec-section-title{font-size:16px;font-weight:700;color:var(--primary);margin-bottom:16px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-.exec-item{display:flex;gap:14px;margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--border)}
-.exec-item:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
-.exec-num{flex-shrink:0;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
-.exec-num-f{background:#ef444422;color:var(--crit);border:1px solid #ef444444}
-.exec-num-p{background:#146bfa22;color:var(--primary);border:1px solid #146bfa44}
-.exec-title{font-size:13px;font-weight:600;color:var(--text);margin-bottom:3px}
-.exec-body{font-size:12px;color:var(--muted);line-height:1.6}
-.exec-tag{display:inline-block;font-size:10px;font-weight:600;padding:1px 6px;border-radius:3px;margin-top:5px}
-.tag-p0{background:#ef444422;color:#fca5a5;border:1px solid #ef444444}
-.tag-insp{background:#146bfa22;color:var(--primary);border:1px solid #146bfa44}
-.tag-gh{background:#22c55e22;color:var(--low);border:1px solid #22c55e44}
-.tag-both{background:#a855f722;color:var(--structural);border:1px solid #a855f744}
+/* Repo links */
 a.repo-link{color:var(--text);text-decoration:none;border-bottom:1px dashed var(--border)}
 a.repo-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
 /* Date picker trigger */
@@ -406,23 +380,6 @@ a.repo-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
 /* Single snapshot notice */
 .snap-notice{padding:14px;background:var(--surface2);border-radius:6px;border:1px solid var(--border);color:var(--muted);font-size:12px;line-height:1.6;text-align:center}
 .snap-notice b{color:var(--text)}
-/* What Changed strip */
-.wc-row{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
-.wc-card{background:var(--surface);border-radius:6px;padding:12px 14px;border-left:3px solid var(--border)}
-.wc-card.win{border-left-color:#22c55e;background:linear-gradient(135deg,#22c55e15,var(--surface) 55%)}
-.wc-card.lose{border-left-color:#ef4444;background:linear-gradient(135deg,#ef444415,var(--surface) 55%)}
-.wc-card.flat{border-left-color:#475569}
-.wc-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:500}
-.wc-main{display:flex;align-items:baseline;gap:6px;line-height:1.1}
-.wc-arrow{font-size:20px;font-weight:700}
-.wc-value{font-size:20px;font-weight:700}
-.wc-win{color:#22c55e}.wc-lose{color:#ef4444}.wc-flat{color:#94a3b8}
-.wc-sub{font-size:11px;color:var(--muted);margin-top:4px}
-.wc-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-.wc-title{font-size:12px;font-weight:600;color:var(--primary);text-transform:uppercase;letter-spacing:.06em}
-.wc-since{font-size:11px;color:var(--muted)}
-@media(max-width:1100px){.wc-row{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:640px){.wc-row{grid-template-columns:1fr}}
 /* Buttons */
 .btn{padding:7px 18px;border-radius:5px;font-family:inherit;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);transition:all .15s}
 .btn-primary{background:var(--primary);border-color:var(--primary);color:#fff}
@@ -430,6 +387,111 @@ a.repo-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
 .btn-primary:disabled{opacity:.4;cursor:not-allowed}
 .btn-ghost{background:transparent;color:var(--muted)}
 .btn-ghost:hover{color:var(--text);border-color:var(--muted)}
+/* What moved */
+.mv-bases{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.mv-basis{padding:6px 14px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--muted);cursor:pointer;font-family:inherit;font-size:12px}
+.mv-basis.active{color:var(--text);border-color:var(--primary);background:#146bfa1f}
+.mv-meta{color:var(--muted);font-size:11.5px}
+.mv-good{color:var(--low)}.mv-bad{color:var(--crit)}
+.mv-k,.mv-eyebrow{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.mv-eyebrow{text-transform:none;letter-spacing:0;font-size:12px}
+.mv-hero{display:grid;grid-template-columns:auto 1fr 300px;gap:28px;align-items:center;border-left:4px solid var(--border)}
+.mv-hero.mv-good{border-left-color:var(--low)}.mv-hero.mv-bad{border-left-color:var(--crit)}
+.mv-hero.mv-good .mv-from,.mv-hero.mv-bad .mv-from{color:var(--muted)}
+.mv-big{font-size:50px;font-weight:700;line-height:1;letter-spacing:-.02em}
+.mv-from{color:var(--muted);font-size:14px;margin-top:8px}.mv-from b{color:var(--text)}
+.mv-factors{display:flex;flex-direction:column;gap:12px}
+.mv-v{font-size:18px;font-weight:600;color:var(--text)}
+.mv-v small{font-size:12px;color:var(--muted);font-weight:400;margin-left:6px}
+.mv-hint{font-size:12px;color:var(--muted)}
+.mv-spark-cap{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px}
+.mv-spark-cap b{color:var(--text);font-weight:500}
+.mv-warns{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px}
+.mv-warn{display:flex;gap:10px;border:1px solid #f59e0b59;background:#f59e0b12;padding:10px 14px;border-radius:10px}
+.mv-warn-i{color:#f59e0b;font-weight:700}
+.mv-warn b{display:block;font-size:13px;color:#fcd34d}
+.mv-warn span{color:var(--muted);font-size:12px}
+.mv-sec{margin-top:44px;padding-top:26px;border-top:1px solid #2a3649}
+.mv-sec h2{font-size:22px;font-weight:700;letter-spacing:-.01em;margin-bottom:6px}
+.mv-sec-lede{color:var(--muted);font-size:13px;max-width:760px;margin-bottom:18px}
+.mv-lead{font-size:17px;font-weight:500;line-height:1.45;max-width:880px}
+.mv-gap-top{margin-top:14px}
+.mv-md p,.mv-md ul{margin:0 0 8px;color:#cbd5e1}
+.mv-md ul{padding-left:20px}.mv-md li{margin-bottom:4px}
+.mv-md p:last-child,.mv-md ul:last-child{margin-bottom:0}
+.mv-md code,.mv-item code{background:var(--surface2);padding:1px 4px;border-radius:3px;font-size:12px}
+.mv-md table{margin:10px 0 4px;max-width:560px}
+#movedPanel a:not(.mv-lk){color:#7fb0ff;text-decoration:none}
+#movedPanel a:not(.mv-lk):hover{text-decoration:underline}
+.mv-levers{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.mv-lever{display:flex;flex-direction:column;gap:12px}
+.mv-lever-head{display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:start}
+.mv-rank{font-family:'Roboto Mono',ui-monospace,monospace;font-size:34px;line-height:.9;color:var(--primary)}
+.mv-owner{display:inline-block;margin-top:6px;font-size:11px;color:#93c5fd;background:#146bfa24;padding:1px 9px;border-radius:999px}
+.mv-impact{display:flex;align-items:center;gap:12px}
+.mv-bar{flex:1;height:8px;background:var(--surface2);border-radius:4px;overflow:hidden}
+.mv-bar i{display:block;height:100%;background:var(--primary);border-radius:4px}
+.mv-pct{font-size:20px;font-weight:700;min-width:58px;text-align:right}
+.mv-abs{font-size:12px;color:var(--muted);min-width:110px}
+.mv-how{font-size:12.5px;color:#cbd5e1}
+.mv-list{border-top:1px solid #2a3649}.mv-list-more{border-top:none}
+.mv-item{display:grid;grid-template-columns:1fr auto auto;gap:14px;align-items:center;padding:8px 0;border-bottom:1px solid #2a3649}
+.mv-item-n{font-weight:500}.mv-item-d{color:var(--muted);font-size:11.5px}
+.mv-num{text-align:right;font-variant-numeric:tabular-nums}
+.mv-acts{display:flex;gap:6px;justify-content:flex-end}
+.mv-lk{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;padding:3px 8px;border:1px solid var(--border);border-radius:6px;color:#7fb0ff;background:transparent;cursor:pointer;font-family:inherit;line-height:1.3;text-decoration:none}
+.mv-lk:hover{border-color:#7fb0ff}
+.mv-icon{width:26px;justify-content:center;padding:3px 0}.mv-icon svg{width:13px;height:13px}
+.mv-icon.done{color:var(--low);border-color:var(--low)}
+.mv-lever details summary{cursor:pointer;color:#7fb0ff;font-size:12px;padding-top:8px;list-style:none}
+.mv-lever details summary::before{content:'+ '}.mv-lever details[open] summary::before{content:'− '}
+.mv-sub{font-size:12px;color:var(--muted);margin-bottom:14px}
+.mv-gaps{display:flex;flex-direction:column;gap:18px}
+.mv-gap-card{border-left:4px solid var(--tone)}
+.mv-gap-h{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:600;color:var(--text);margin-bottom:4px}
+.mv-gap-h::before{content:'';width:10px;height:10px;border-radius:50%;background:var(--tone);flex:none}
+.mv-gap-n{font-size:12px;font-weight:700;color:var(--tone);background:color-mix(in srgb,var(--tone) 16%,transparent);border:1px solid color-mix(in srgb,var(--tone) 45%,transparent);padding:1px 10px;border-radius:999px}
+.mv-gap-card .mv-num{color:var(--tone);font-weight:600}
+.mv-pulled{color:var(--muted);font-weight:400;font-size:11.5px}
+.dtag-basis{background:#f59e0b22;color:#fbbf24;border:1px solid #f59e0b55}
+.dtag-note{background:#a78bfa22;color:#c4b5fd;border:1px solid #a78bfa55}
+.mv-lever h3{font-size:15px;font-weight:600;line-height:1.35}
+/* What moved: the agent's blocks (STYLEGUIDE.md) */
+.mv-tone-fix{--tone:var(--low)}.mv-tone-inventory{--tone:#94a3b8}.mv-tone-gap{--tone:#f59e0b}.mv-tone-risk{--tone:var(--crit)}.mv-tone-unknown{--tone:#a78bfa}.mv-tone-info{--tone:#38bdf8}.mv-tone-none{--tone:var(--text)}
+.mv-note{display:flex;flex-direction:column;gap:14px;margin-top:16px}
+.mv-note>.mv-md{max-width:920px}
+.mv-md h3{font-size:17px;font-weight:600;color:var(--text);margin:18px 0 4px}
+.mv-md h4{font-size:14px;font-weight:600;color:var(--text);margin:12px 0 4px}
+.mv-md h5{font-size:13px;color:var(--text);margin:12px 0 6px}
+.mv-stats-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.mv-stat-block{background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--tone);border-radius:10px;padding:14px 16px}
+.mv-stat-v{font-size:30px;font-weight:700;line-height:1.05;color:var(--tone);font-variant-numeric:tabular-nums;white-space:nowrap}
+.mv-stat-wide .mv-stat-v{font-size:23px}
+.mv-stat-l{font-size:12.5px;color:var(--text);margin-top:6px}.mv-stat-s{font-size:11.5px;color:var(--muted);margin-top:2px}
+button.mv-stat-block{font-family:inherit;text-align:left;cursor:pointer;width:100%}
+.mv-stat-link{display:grid;grid-template-columns:auto 1fr;align-items:stretch;padding-left:0}
+.mv-stat-idx{display:flex;align-items:center;justify-content:center;min-width:52px;padding:0 12px;margin:-14px 14px -14px 0;
+  border-right:1px solid var(--border);background:linear-gradient(180deg,transparent,#ffffff06);
+  font-family:'Roboto Mono',ui-monospace,monospace;font-size:38px;font-weight:500;line-height:1;color:var(--tone);opacity:.7}
+.mv-stat-link:hover .mv-stat-idx{opacity:1}
+.mv-md h3[data-index]{display:flex;align-items:center;gap:10px}
+.mv-md h3[data-index]::before{content:attr(data-index);flex:none;display:inline-flex;align-items:center;justify-content:center;
+  width:28px;height:28px;border-radius:50%;border:1.5px solid var(--tone);color:var(--tone);
+  font-family:'Roboto Mono',ui-monospace,monospace;font-size:14px;font-weight:500}
+.mv-stat-link{transition:border-color .15s,transform .15s}.mv-stat-link:hover{border-color:var(--tone);transform:translateY(-1px)}
+.mv-stat-go{font-size:11px;color:#7fb0ff;margin-top:8px}
+.mv-md h3{scroll-margin-top:16px;border-radius:6px;transition:background .3s,box-shadow .3s}
+.mv-md h3.mv-flash{background:#146bfa26;box-shadow:0 0 0 6px #146bfa26}
+.panel-link{margin-left:8px;background:none;border:none;cursor:pointer;font-size:12px;line-height:1;opacity:.45;transition:opacity .15s;padding:0;vertical-align:middle}
+.panel-link:hover,.panel-link:focus-visible{opacity:1}
+.panel-flash{box-shadow:0 0 0 2px var(--primary);border-radius:8px;transition:box-shadow .3s}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--primary);color:var(--text);padding:10px 18px;border-radius:6px;font-size:12px;z-index:9999;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+.mv-chart-block h4,.mv-chart-title{font-size:14px;font-weight:600;margin-bottom:2px}
+.mv-callout{border:1px solid var(--border);border-left:4px solid var(--tone);background:var(--surface);border-radius:10px;padding:12px 16px}
+.mv-callout b{display:block;color:var(--tone);font-size:13.5px;margin-bottom:4px}
+.mv-block-error{border:1px dashed var(--crit);color:#fca5a5;border-radius:8px;padding:10px 14px;font-size:12px}
+@media (max-width:900px){.mv-hero{grid-template-columns:1fr}.mv-warns,.mv-levers{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -464,31 +526,26 @@ a.repo-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
 </div>
 
 <div class="tab-nav">
-  <button class="tab-btn active" data-tab="breakdown" onclick="switchTab(this,'breakdown')">Breakdown</button>
+  <button class="tab-btn active" data-tab="moved"     onclick="switchTab(this,'moved')">What moved</button>
+  <button class="tab-btn"         data-tab="breakdown" onclick="switchTab(this,'breakdown')">Breakdown</button>
   <button class="tab-btn"         data-tab="trend"     onclick="switchTab(this,'trend')">Trend</button>
-  <button class="tab-btn"         data-tab="exec"      onclick="switchTab(this,'exec')">Executive Summary</button>
 </div>
 
-<!-- Executive Summary tab -->
-<div id="tab-exec" class="tab-pane">
-  <div id="execBanner"></div>
-  <div class="exec-col">
-    <div><div class="exec-section-title">Key Findings</div><div id="execFindings"></div></div>
-    <div><div class="exec-section-title">Priority Actions</div><div id="execPriorities"></div></div>
-  </div>
+<!-- What moved tab: the default -->
+<div id="tab-moved" class="tab-pane active">
+  <div id="movedPanel"></div>
 </div>
 
 <!-- Breakdown tab -->
-<div id="tab-breakdown" class="tab-pane active">
+<div id="tab-breakdown" class="tab-pane">
   <div id="secretsBanner"></div>
-  <div id="whatChangedRow"></div>
   <div class="grid-6" id="kpiRow"></div>
   <div class="grid-3" style="margin-bottom:20px" id="zoneRow"></div>
 
   <div class="card" style="margin-bottom:20px">
     <div class="card-title">Top Offenders — Repos Flagged by Multiple Signals</div>
     <p style="color:var(--muted);font-size:11px;margin-bottom:12px">
-      Repos in the top 15 of 2+ independent signal categories. Highest-confidence fix targets.
+      Repos in the top __TOP_N__ of 2+ independent signal categories.
     </p>
     <div style="overflow-x:auto"><table>
       <thead><tr><th>Repository</th><th>Signals</th><th>Insp C+H</th><th>GH C+H</th><th>Code Scan</th><th>Secrets</th><th>Score</th></tr></thead>
@@ -499,13 +556,13 @@ a.repo-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
   <div class="grid-2 grid-2-6" style="margin-bottom:20px">
     <div class="card">
       <div class="card-title">Combined Repo Rankings — All Four Signals</div>
-      <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Inspector (image) + GitHub Dependabot (source) + Code Scanning + Secrets. GitHub and secrets weighted higher — no fan-out inflation.</p>
+      <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Each bar is a repo's combined score: every source counted with the weight in its label.</p>
       <div style="height:360px"><canvas id="repoRankChart"></canvas></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:16px">
       <div class="card">
         <div class="card-title">Secret Scanning — Open Alerts</div>
-        <p style="color:#fca5a5;font-size:11px;margin-bottom:10px">Credential-level exposures. Triage and rotate — not a backlog item.</p>
+        <p style="color:#fca5a5;font-size:11px;margin-bottom:10px">Default (provider-pattern) secret types only; generic secret types are not collected.</p>
         <div style="height:180px"><canvas id="secretTypeChart"></canvas></div>
       </div>
       <div class="card">
@@ -515,20 +572,7 @@ a.repo-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
     </div>
   </div>
 
-  <div class="card" style="margin-bottom:20px">
-    <div class="card-title">Package Quick-Win Matrix — Both Sources</div>
-    <p style="color:var(--muted);font-size:11px;margin-bottom:8px">
-      Zone A packages (Inspector <em>and</em> GitHub). Bubble size ∝ quick-win score.
-      <b style="color:var(--trivial)">Top-left = fix now.</b> Hover for details.
-    </p>
-    <div style="height:360px"><canvas id="qwChart"></canvas></div>
-    <div style="display:flex;gap:16px;margin-top:8px;flex-wrap:wrap;font-size:11px">
-      <span><span style="color:var(--trivial)">●</span> Trivial (≤5 repos)</span>
-      <span><span style="color:var(--bounded)">●</span> Bounded (6+ repos)</span>
-      <span><span style="color:var(--phantom)">●</span> Phantom (no fix)</span>
-      <span><span style="color:var(--structural)">●</span> Structural (migration)</span>
-    </div>
-  </div>
+
 
   <div class="grid-2 grid-2-eq" style="margin-bottom:20px">
     <div class="card"><div class="card-title">Inspector V2 — Top Repos</div><div style="height:300px"><canvas id="inspRepoChart"></canvas></div></div>
@@ -546,22 +590,23 @@ a.repo-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
   <div class="grid-6" id="trendKpiRow" style="margin-bottom:20px"></div>
   <div class="card" style="margin-bottom:20px">
     <div class="card-title">Inspector V2 — Findings Trend</div>
-    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Stacked bars: Critical + High raw findings (left axis). Blue line: unique CVEs (right axis) — cuts through fan-out noise to show distinct vulnerability classes being resolved.</p>
+    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Stacked bars: Critical + High raw findings (left axis). Blue line: unique CVEs (right axis) — distinct vulnerabilities, without fan-out across images.</p>
     <div style="height:340px"><canvas id="trendInspChart"></canvas></div>
   </div>
   <div class="card" style="margin-bottom:20px">
     <div class="card-title">GitHub Security Alerts — by Source</div>
-    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Total open alerts (matches GitHub Security Overview) and the three source breakdowns: Dependabot vulnerabilities, Code Scanning (SAST), and Secret Scanning. Log Y axis — all four lines stay visible despite the scale gap (Dep ~3K vs Secrets ~150).</p>
+    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Total open alerts and the three sources: Dependabot vulnerabilities, code scanning (SAST) and default secret alerts.</p>
     <div style="height:300px"><canvas id="trendGhChart"></canvas></div>
   </div>
   <div class="card">
     <div class="card-title">GitHub Security Alerts — by Severity</div>
-    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Mirrors GitHub Security Overview's "Open alerts over time". Severity buckets computed across all three sources: Dependabot + Code Scanning (errors→High, warnings→Medium) + Secrets (counted as Critical). Small discrepancies vs GitHub's UI come from CS rule-level severity mapping which we approximate.</p>
+    <p style="color:var(--muted);font-size:11px;margin-bottom:10px">Severity across Dependabot, code scanning (errors as High, warnings as Medium) and default secret alerts (counted as Critical; generic secret types are not collected). Code-scanning severity is approximated from error and warning levels.</p>
     <div style="height:300px"><canvas id="trendGhSevChart"></canvas></div>
   </div>
 </div><!-- /tab-trend -->
 
 </div><!-- /page -->
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
 <script>
 const SNAPSHOTS    = __SNAPSHOTS__;
 const DATES        = __DATES__;
@@ -569,836 +614,12 @@ const CURRENT_DATE = __CURRENT_DATE__;
 const ORG          = '__ORG__';
 const TREND_SERIES = __TREND_SERIES__;
 const ANNOTATIONS  = __ANNOTATIONS__;
-let D              = SNAPSHOTS[CURRENT_DATE];
-const CHARTS       = {};
-
-// ── Utilities ─────────────────────────────────────────────────────────────────
-const fmt  = n => n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?(n/1e3).toFixed(0)+'K':String(n);
-const fmtN = n => Number(n).toLocaleString();
-const DARK = {backgroundColor:'#1e293b',borderColor:'#334155',borderWidth:1,
-              titleColor:'#e2e8f0',bodyColor:'#94a3b8',padding:10,displayColors:false};
-
-// Parse YYYYMMDD slug into a Date.
-function slugToDate(s){return new Date(s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8)+'T00:00:00Z')}
-
-// Find the snapshot in TREND_SERIES closest to `targetDays` days before `currentSlug`,
-// preferring snapshots ≥ targetDays old. Returns {base, ageDays} or null.
-function pickBaseline(currentSlug, targetDays) {
-  if (!TREND_SERIES || TREND_SERIES.length < 2) return null;
-  const curDt = slugToDate(currentSlug);
-  const target = new Date(curDt.getTime() - targetDays * 86400e3);
-  let preferred = null, fallback = null;
-  let preferredDiff = Infinity, fallbackAge = -Infinity;
-  for (const s of TREND_SERIES) {
-    if (s.date === currentSlug) continue;
-    const dt = slugToDate(s.date);
-    if (dt > curDt) continue;
-    if (dt <= target) {
-      const diff = Math.abs(dt - target);
-      if (diff < preferredDiff) { preferredDiff = diff; preferred = s; }
-    } else {
-      const age = (curDt - dt) / 86400e3;
-      if (age > fallbackAge) { fallbackAge = age; fallback = s; }
-    }
-  }
-  const base = preferred || fallback;
-  if (!base) return null;
-  const ageDays = Math.round((curDt - slugToDate(base.date)) / 86400e3);
-  return { base, ageDays };
-}
-
-// Format a delta block. While we have <30 days of history, the baseline is the
-// earliest snapshot available — make that explicit so the number isn't read as a
-// monthly trend.
-function deltaSub(curVal, baseVal, ageDays, targetDays = 30) {
-  const d = curVal - baseVal;
-  const pct = baseVal > 0 ? (Math.abs(d) / baseVal * 100).toFixed(1) : '0.0';
-  const dir = d > 0 ? '↑' : d < 0 ? '↓' : '→';
-  const col = d > 0 ? 'var(--crit)' : d < 0 ? 'var(--low)' : 'var(--muted)';
-  const txt = d === 0 ? 'no change' : `${dir} ${fmtN(Math.abs(d))} (${pct}%)`;
-  const suffix = ageDays < targetDays
-    ? ` vs ${ageDays}d ago — building ${targetDays}d baseline`
-    : ` vs ${ageDays}d ago`;
-  return `<span style="color:${col}">${txt}</span>${suffix}`;
-}
-
-function mkChart(id, config) {
-  CHARTS[id]?.destroy();
-  CHARTS[id] = new Chart(document.getElementById(id), config);
-}
-
-function hBar(id, labels, datasets) {
-  mkChart(id, {
-    type:'bar', data:{labels, datasets},
-    options:{
-      responsive:true, maintainAspectRatio:false, indexAxis:'x',
-      scales:{
-        x:{stacked:true,grid:{display:false},ticks:{color:'#e2e8f0',font:{size:9},maxRotation:38,minRotation:38}},
-        y:{stacked:true,grid:{color:'#334155'},ticks:{color:'#94a3b8',font:{size:9},callback:v=>v>=1000?(v/1000)+'K':v}},
-      },
-      plugins:{
-        legend:{labels:{color:'#94a3b8',font:{size:10},boxWidth:10,padding:8}},
-        tooltip:{...DARK,callbacks:{label:i=>` ${i.dataset.label}: ${fmtN(i.raw)}`}},
-      }
-    }
-  });
-}
-
-// ── Tab switching ─────────────────────────────────────────────────────────────
-// Chart.js measures the canvas container at creation time. Creating charts inside
-// a display:none tab gives them a 0×0 canvas, and .resize() can't always recover.
-// We defer chart rendering until the breakdown/trend tabs are actually visible.
-let breakdownRendered = false;
-let trendRendered     = false;
-let currentTab        = 'breakdown';  // matches the default `.tab-pane.active` in HTML
-
-function switchTab(btn, id, skipUrl) {
-  document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById('tab-'+id).classList.add('active');
-  btn.classList.add('active');
-  currentTab = id;
-
-  if (id === 'breakdown' && !breakdownRendered) {
-    renderDetail();
-    breakdownRendered = true;
-  } else if (id === 'breakdown') {
-    // Already rendered. requestAnimationFrame waits a frame for CSS to apply,
-    // then forces a measure pass — handles browser-side container size changes.
-    requestAnimationFrame(() => Object.values(CHARTS).forEach(c => c?.resize()));
-  } else if (id === 'trend' && !trendRendered) {
-    renderTrend();
-    trendRendered = true;
-  } else if (id === 'trend') {
-    requestAnimationFrame(() => Object.values(CHARTS).forEach(c => c?.resize()));
-  }
-
-  if (!skipUrl) urlWrite();
-}
-
-// ── URL routing — shareable per-tab + per-snapshot links ──────────────────────
-// Hash format: #<tab>/<snapshot>   e.g.  #breakdown/20260525
-// On Apps Script, the dashboard runs inside Google's sandbox iframe — direct
-// location.hash changes only affect the iframe URL, not the parent address bar.
-// google.script.history.push / google.script.url.getLocation bridge to the
-// parent URL. On local file:// we fall back to native location.hash.
-const TAB_IDS = ['breakdown','trend','exec'];
-const GAS = typeof google !== 'undefined' && google.script && google.script.url;
-
-function switchTabById(id, skipUrl) {
-  if (!TAB_IDS.includes(id)) return;
-  const btn = document.querySelector('.tab-btn[data-tab="'+id+'"]');
-  if (btn) switchTab(btn, id, skipUrl);
-}
-
-function parseHash(raw) {
-  const clean = (raw || '').replace(/^#/, '');
-  if (!clean) return { tab: null, snap: null };
-  const [t, s] = clean.split('/');
-  return {
-    tab:  TAB_IDS.includes(t)        ? t : null,
-    snap: (s && SNAPSHOTS[s])        ? s : null,
-  };
-}
-
-function urlWrite() {
-  const h = currentTab + '/' + activeDate;
-  if (GAS && google.script.history) {
-    google.script.history.push(null, null, h);
-  } else if (location.hash !== '#'+h) {
-    history.replaceState(null, '', '#'+h);
-  }
-}
-
-function applyHash(rawHash) {
-  const { tab, snap } = parseHash(rawHash);
-  if (snap && snap !== activeDate) loadDate(snap, true);
-  if (tab) switchTabById(tab, true);
-}
-
-window.addEventListener('DOMContentLoaded', () => {
-  if (GAS) {
-    google.script.url.getLocation(loc => applyHash((loc && loc.hash) || ''));
-  } else {
-    applyHash(location.hash || '');
-  }
-});
-
-if (typeof google !== 'undefined' && google.script && google.script.history) {
-  google.script.history.setChangeHandler(e => {
-    applyHash((e && e.location && e.location.hash) || '');
-  });
-} else {
-  window.addEventListener('hashchange', () => applyHash(location.hash || ''));
-}
-
-// ── Date modal ────────────────────────────────────────────────────────────────
-function fmtDate(s){return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8)}
-
-let activeDate    = CURRENT_DATE;   // currently loaded snapshot
-let selectedDate  = CURRENT_DATE;   // selection inside the modal (not yet committed)
-
-function updateSnapDisplay() {
-  document.getElementById('snapDisplay').textContent = fmtDate(activeDate);
-}
-updateSnapDisplay();
-
-function openDateModal() {
-  selectedDate = activeDate;        // pre-select the current snapshot
-  const body   = document.getElementById('dateModalBody');
-  const footer = document.getElementById('dateModalFooter');
-
-  if (DATES.length === 1) {
-    body.innerHTML = `
-      <div class="snap-notice">
-        Only one snapshot is available.<br>
-        <b>${fmtDate(DATES[0])}</b> — currently loaded.
-      </div>`;
-    footer.innerHTML = `
-      <button class="btn btn-ghost" onclick="closeDateModal()">Close</button>`;
-  } else {
-    body.innerHTML = `<div class="date-list" id="dateList">` +
-      DATES.map((d, i) => {
-        const tags = [
-          i === 0            ? `<span class="dtag dtag-latest">Latest</span>` : '',
-          d === activeDate   ? `<span class="dtag dtag-current">Current</span>` : '',
-        ].join('');
-        return `<div class="date-list-item${d===selectedDate?' selected':''}"
-                     data-date="${d}" onclick="selectModalDate('${d}')">
-                  <span class="date-list-date">${fmtDate(d)}</span>
-                  <span class="date-list-tags">${tags}</span>
-                </div>`;
-      }).join('') + `</div>`;
-
-    footer.innerHTML = `
-      <button class="btn btn-ghost" onclick="closeDateModal()">Cancel</button>
-      <button class="btn btn-primary" id="loadSnapBtn"
-              onclick="confirmLoadDate()"
-              ${selectedDate === activeDate ? 'disabled' : ''}>
-        Load Snapshot
-      </button>`;
-  }
-
-  document.getElementById('dateModal').classList.add('open');
-  document.addEventListener('keydown', handleModalKeydown);
-}
-
-function selectModalDate(date) {
-  selectedDate = date;
-  document.querySelectorAll('#dateList .date-list-item').forEach(el => {
-    el.classList.toggle('selected', el.dataset.date === date);
-  });
-  const btn = document.getElementById('loadSnapBtn');
-  if (btn) btn.disabled = (date === activeDate);
-}
-
-function confirmLoadDate() {
-  if (!selectedDate || selectedDate === activeDate) return;
-  loadDate(selectedDate);
-  closeDateModal();
-}
-
-function closeDateModal() {
-  document.getElementById('dateModal').classList.remove('open');
-  document.removeEventListener('keydown', handleModalKeydown);
-}
-
-function handleOverlayClick(e) {
-  if (e.target === document.getElementById('dateModal')) closeDateModal();
-}
-
-function handleModalKeydown(e) {
-  if (e.key === 'Escape') closeDateModal();
-}
-
-function loadDate(date, skipUrl) {
-  D          = SNAPSHOTS[date];
-  activeDate = date;
-  updateSnapDisplay();
-  renderAll();
-  if (!skipUrl) urlWrite();
-}
-
-// ── Main render — always-visible content only (banners, KPIs, exec summary) ──
-// Detail-tab content (zones, convergence table, all charts) is deferred to
-// renderDetail() to avoid the hidden-canvas issue.
-function renderAll() {
-  const insp = D.inspector, gh = D.github, corr = D.correlation;
-  const rawTotal = insp.critical + insp.high + insp.medium;
-
-  // -- Banners
-  document.getElementById('secretsBanner').innerHTML = gh.secrets_total > 0
-    ? `<div class="banner-p0"><div class="icon">⚠</div><div>
-         <div class="title">P0 — ${gh.secrets_total} open secret scanning alerts</div>
-         <div class="sub">Exposed credentials committed to source code. Triage and rotate before all other work.</div>
-       </div></div>`
-    : '';
-
-  // -- What Changed strip
-  renderWhatChanged();
-
-  // -- KPIs
-  const ghTotal = (typeof gh.security_total === 'number')
-    ? gh.security_total
-    : (gh.vuln_total + gh.code_total + gh.secrets_total);
-  const baseline = pickBaseline(activeDate, 30);
-  const ghTotalSub = baseline
-    ? `Matches GitHub Security Overview · ${deltaSub(ghTotal, baseline.base.gh_total, baseline.ageDays)}`
-    : 'Matches GitHub Security Overview · no baseline yet';
-
-  document.getElementById('kpiRow').innerHTML = [
-    ['Inspector Raw',     fmt(rawTotal),          'c',  `${fmtN(insp.unique_cves)} unique CVEs · ~${insp.fanout}× fan-out`],
-    ['GH Security Total', fmtN(ghTotal),          'b',  ghTotalSub],
-    ['Dependabot Alerts', fmtN(gh.vuln_total),    'h',  `${fmtN(gh.vuln_critical)} CRIT · ${fmtN(gh.vuln_high)} HIGH`],
-    ['Code Scanning',     fmtN(gh.code_total),    'b',  `${fmtN(gh.code_errors)} errors · ${gh.code_total-gh.code_errors} warnings`],
-    ['Secret Scanning',   fmtN(gh.secrets_total), 'p0', 'Credential exposures — P0'],
-    ['Zone A Overlap',    corr.zone_a_pkgs,       'g',  `${corr.zone_a_cves} CVEs confirmed in both sources`],
-  ].map(([l,v,c,s])=>
-    `<div class="card"><div class="kpi-label">${l}</div>
-     <div class="kpi-val ${c}">${v}</div>
-     <div class="kpi-sub">${s}</div></div>`
-  ).join('');
-
-  // -- Executive summary (visible by default — render now)
-  renderExec(insp, gh, corr, rawTotal);
-
-  // -- Breakdown tab content: render only when visible (or eagerly on initial
-  //    load since Breakdown is now the default tab).
-  if (breakdownRendered) {
-    // Breakdown was previously opened; refresh its content for the new D.
-    renderDetail();
-  } else if (document.getElementById('tab-breakdown').classList.contains('active')) {
-    renderDetail();
-    breakdownRendered = true;
-  }
-}
-
-// ── What Changed strip — snapshot-to-snapshot deltas ─────────────────────────
-// Compares the currently loaded snapshot to the immediately preceding one
-// (DATES is sorted desc — DATES[idx+1] is the older one). Hides cleanly when
-// no previous snapshot exists. Five pinned metrics: GH Security Total,
-// Critical (GH cross-source), Inspector C+H, Dependabot Alerts, Secret Scanning.
-function renderWhatChanged() {
-  const container = document.getElementById('whatChangedRow');
-  const idx       = DATES.indexOf(activeDate);
-  const prevDate  = (idx >= 0 && idx + 1 < DATES.length) ? DATES[idx + 1] : null;
-  if (!prevDate || !SNAPSHOTS[prevDate]) { container.innerHTML = ''; return; }
-
-  const prev    = SNAPSHOTS[prevDate];
-  const ageDays = Math.round((slugToDate(activeDate) - slugToDate(prevDate)) / 86400e3);
-
-  // Resolve fields with fallbacks for legacy snapshots that pre-date the schema additions.
-  const ghTotal = s => (typeof s.github.security_total === 'number')
-    ? s.github.security_total
-    : (s.github.vuln_total + s.github.code_total + s.github.secrets_total);
-  const ghCrit  = s => (typeof s.github.sev_critical === 'number')
-    ? s.github.sev_critical
-    : (s.github.vuln_critical + s.github.secrets_total);
-
-  const metrics = [
-    {label: 'GH Security Total', cur: ghTotal(D),                  prv: ghTotal(prev)},
-    {label: 'Critical (GH)',     cur: ghCrit(D),                   prv: ghCrit(prev)},
-    {label: 'Inspector C+H',     cur: D.inspector.critical + D.inspector.high,
-                                  prv: prev.inspector.critical + prev.inspector.high},
-    {label: 'Dependabot Alerts', cur: D.github.vuln_total,          prv: prev.github.vuln_total},
-    {label: 'Secret Scanning',   cur: D.github.secrets_total,       prv: prev.github.secrets_total},
-  ];
-
-  const cards = metrics.map(m => {
-    const d   = m.cur - m.prv;
-    const pct = m.prv > 0 ? (Math.abs(d) / m.prv * 100).toFixed(1) : '0.0';
-    let cls, arrow, txt, prefix;
-    if (d < 0)      { cls = 'win';  arrow = '↓'; txt = 'wc-win';  prefix = '-'; }
-    else if (d > 0) { cls = 'lose'; arrow = '↑'; txt = 'wc-lose'; prefix = '+'; }
-    else            { cls = 'flat'; arrow = '•'; txt = 'wc-flat'; prefix = '';  }
-    const hero = d === 0 ? 'no change' : (prefix + fmtN(Math.abs(d)));
-    const sub  = d === 0 ? ('held at ' + fmtN(m.cur)) : (prefix + pct + '% · now ' + fmtN(m.cur));
-    return `<div class="wc-card ${cls}">
-              <div class="wc-label">${m.label}</div>
-              <div class="wc-main">
-                <span class="wc-arrow ${txt}">${arrow}</span>
-                <span class="wc-value ${txt}">${hero}</span>
-              </div>
-              <div class="wc-sub">${sub}</div>
-            </div>`;
-  }).join('');
-
-  container.innerHTML =
-    '<div class="card" style="margin-bottom:20px">' +
-      '<div class="wc-header">' +
-        '<span class="wc-title">What Changed</span>' +
-        '<span class="wc-since">since ' + fmtDate(prevDate) + ' · ' + ageDays + 'd ago</span>' +
-      '</div>' +
-      '<div class="wc-row">' + cards + '</div>' +
-    '</div>';
-}
-
-// ── Detail tab — zones, convergence table, all charts ─────────────────────────
-// Called when the detail tab first becomes visible (or on date change if it was
-// already initialised). All canvas-using charts MUST be created here, never in
-// renderAll(), to avoid the 0×0-canvas-in-hidden-tab issue.
-function renderDetail() {
-  const insp = D.inspector, gh = D.github, corr = D.correlation;
-
-  // -- Zones
-  document.getElementById('zoneRow').innerHTML = [
-    ['Zone A',corr.zone_a_cves,'#22c55e','CVEs in BOTH sources',     'Confirmed end-to-end. One fix closes findings in both scanners.'],
-    ['Zone B',corr.zone_b,     '#146bfa','Inspector only',            'In image, not source. Base image upgrade closes most.'],
-    ['Zone C',corr.zone_c,     '#f97316','GitHub only',               'In source, not Inspector. Image may be newer, or repo has no ECR scan.'],
-  ].map(([l,v,c,s,d])=>
-    `<div class="card zone-card">
-       <div class="zone-lbl">${l}</div>
-       <div class="zone-val" style="color:${c}">${fmtN(v)}</div>
-       <div style="font-size:12px;font-weight:600;color:var(--text)">${s}</div>
-       <div class="zone-desc">${d}</div>
-     </div>`
-  ).join('');
-
-  // -- Convergence table
-  const SB = {
-    Inspector: '<span class="signal-badge s-insp">Inspector</span>',
-    Dependabot:'<span class="signal-badge s-dep">Dependabot</span>',
-    CodeScan:  '<span class="signal-badge s-cs">CodeScan</span>',
-    Secrets:   '<span class="signal-badge s-sec">Secrets</span>',
-  };
-  document.getElementById('convergenceTbody').innerHTML = (corr.convergence||[]).map(r=>{
-    const badges = (r.signals||[]).map(s=>SB[s]||s).join('');
-    // GAS parser bug: a template literal containing }/${ (close-interp, slash, open-interp)
-    // is misread as the start of a regex, mangling the rest of the script and producing
-    // "Unexpected token '<'" in the served page. Use string concatenation for any URL or
-    // path built from multiple variables. Plain template literals without ${...}/${...}
-    // (e.g., outer HTML strings with </td>) are fine.
-    const url    = 'https://github.com/' + ORG + '/' + r.repo + '/security/dependabot';
-    return `<tr>
-      <td><a class="repo-link" href="${url}" target="_blank">${r.repo}</a></td>
-      <td>${badges}</td>
-      <td>${fmtN(r.insp_crit+r.insp_high)}</td>
-      <td>${fmtN(r.gh_crit+r.gh_high)}</td>
-      <td>${r.code_scanning}</td>
-      <td>${r.secrets>0?`<b style="color:var(--crit)">${r.secrets}</b>`:'0'}</td>
-      <td style="color:var(--muted);font-size:11px">${fmtN(r.combined_score)}</td>
-    </tr>`;
-  }).join('');
-
-  // -- Repo ranking chart
-  const rr = corr.repo_ranking;
-  hBar('repoRankChart', rr.map(r=>r.repo), [
-    {label:'Inspector C+H',data:rr.map(r=>r.insp_crit+r.insp_high), backgroundColor:'#146bfa88',borderColor:'#146bfa',borderWidth:1,stack:'s'},
-    {label:'GH Dependabot', data:rr.map(r=>r.gh_crit+r.gh_high),   backgroundColor:'#22c55e88',borderColor:'#22c55e',borderWidth:1,stack:'s'},
-    {label:'Code Scan ×5',  data:rr.map(r=>r.code_scanning*5),      backgroundColor:'#eab30888',borderColor:'#eab308',borderWidth:1,stack:'s'},
-    {label:'Secrets ×100',  data:rr.map(r=>r.secrets*100),          backgroundColor:'#ef444488',borderColor:'#ef4444',borderWidth:1,stack:'s'},
-  ]);
-
-  // -- Secret types doughnut
-  {
-    const items = gh.secrets_by_type.slice(0,10);
-    mkChart('secretTypeChart', {
-      type:'doughnut',
-      data:{
-        labels: items.map(x=>x.type.replace(/_/g,' ').replace('aws ','AWS ').replace('google ','Google ').replace('github ','GitHub ')),
-        datasets:[{
-          data: items.map(x=>x.count),
-          backgroundColor:['#ef4444cc','#f97316cc','#eab308cc','#22c55ecc','#3b82f6cc','#a855f7cc','#ec4899cc','#14b8a6cc','#6366f1cc','#f43f5ecc'],
-          borderWidth:1, hoverOffset:4,
-        }]
-      },
-      options:{responsive:true,maintainAspectRatio:false,cutout:'55%',
-        plugins:{legend:{position:'right',labels:{color:'#94a3b8',font:{size:9},boxWidth:8,padding:5}},
-                 tooltip:{...DARK,callbacks:{label:i=>` ${i.label}: ${i.raw}`}}}}
-    });
-  }
-
-  // -- Code scanning bar
-  {
-    const items = gh.cs_by_repo.slice(0,10);
-    hBar('csRepoChart', items.map(x=>x.repo),
-      [{label:'Alerts',data:items.map(x=>x.count),backgroundColor:'#eab30888',borderColor:'#eab308',borderWidth:1,borderRadius:3}]
-    );
-  }
-
-  // -- Package quick-win scatter
-  {
-    const ELABELS = {1:'Trivial',2:'Bounded',3:'Phantom',4:'Structural'};
-    const ECOLOR  = {1:'#22c55e',2:'#3b82f6',3:'#64748b',4:'#a855f7'};
-    const grouped = {1:[],2:[],3:[],4:[]};
-    (corr.pkg_quickwin||[]).forEach(p=>(grouped[p.effort]||grouped[4]).push(p));
-    mkChart('qwChart', {
-      type:'bubble',
-      data:{datasets:Object.entries(grouped).filter(([,pts])=>pts.length).map(([e,pts])=>({
-        label:ELABELS[e],
-        data:pts.map(p=>({x:p.x+(Math.random()*.3-.15),y:p.y||10,r:p.r,_p:p})),
-        backgroundColor:ECOLOR[e]+'bb',borderColor:ECOLOR[e],borderWidth:1.5,
-      }))},
-      options:{responsive:true,maintainAspectRatio:false,
-        scales:{
-          x:{min:.5,max:4.5,title:{display:true,text:'Effort',color:'#94a3b8',font:{size:11}},
-             ticks:{color:'#94a3b8',font:{size:10},stepSize:1,callback:v=>({1:'Trivial',2:'Bounded',3:'Phantom',4:'Structural'})[Math.round(v)]||''},
-             grid:{color:'#334155'}},
-          y:{type:'logarithmic',min:10,max:1500000,
-             title:{display:true,text:'Combined C+H (log)',color:'#94a3b8',font:{size:11}},
-             ticks:{color:'#94a3b8',font:{size:10},callback:v=>v>=1e6?(v/1e6)+'M':v>=1e3?(v/1e3)+'K':v},
-             grid:{color:'#334155'}},
-        },
-        plugins:{
-          legend:{labels:{color:'#94a3b8',font:{size:11},boxWidth:10,padding:12}},
-          tooltip:{...DARK,callbacks:{
-            title:items=>items[0].raw._p.pkg,
-            label:i=>{const p=i.raw._p;return[`Effort: ${p.label}`,`Insp C+H: ${fmtN(p.insp_ch)}  GH C+H: ${fmtN(p.gh_ch)}`,`Repos: ${p.repos}  Fix: ${p.fix?'✓':'✗'}`,`QW Score: ${fmtN(p.score)}`];}
-          }}
-        }
-      }
-    });
-  }
-
-  // -- Inspector repo/pkg charts
-  hBar('inspRepoChart', insp.top_repos.map(r=>r.name), [
-    {label:'Critical',data:insp.top_repos.map(r=>r.c),backgroundColor:'#ef444488',borderColor:'#ef4444',borderWidth:1,stack:'s'},
-    {label:'High',    data:insp.top_repos.map(r=>r.h),backgroundColor:'#f9731688',borderColor:'#f97316',borderWidth:1,stack:'s'},
-    {label:'Medium',  data:insp.top_repos.map(r=>r.m),backgroundColor:'#eab30888',borderColor:'#eab308',borderWidth:1,stack:'s'},
-  ]);
-  hBar('inspPkgChart', insp.top_pkgs.map(p=>p.name), [
-    {label:'Critical',data:insp.top_pkgs.map(p=>p.c),backgroundColor:'#ef444488',borderColor:'#ef4444',borderWidth:1,stack:'s'},
-    {label:'High',    data:insp.top_pkgs.map(p=>p.h),backgroundColor:'#f9731688',borderColor:'#f97316',borderWidth:1,stack:'s'},
-  ]);
-
-  // -- GitHub repo/pkg charts
-  const gr = gh.top_repos.slice(0,12);
-  hBar('ghRepoChart', gr.map(r=>r.repo), [
-    {label:'Critical', data:gr.map(r=>r.CRITICAL||0), backgroundColor:'#ef444488',borderColor:'#ef4444',borderWidth:1,stack:'s'},
-    {label:'High',     data:gr.map(r=>r.HIGH||0),     backgroundColor:'#f9731688',borderColor:'#f97316',borderWidth:1,stack:'s'},
-    {label:'Moderate', data:gr.map(r=>r.MODERATE||0), backgroundColor:'#eab30888',borderColor:'#eab308',borderWidth:1,stack:'s'},
-  ]);
-  const gp = gh.top_pkgs.slice(0,15);
-  hBar('ghPkgChart', gp.map(p=>p.package), [
-    {label:'Critical', data:gp.map(p=>p.critical), backgroundColor:'#ef444488',borderColor:'#ef4444',borderWidth:1,stack:'s'},
-    {label:'High',     data:gp.map(p=>p.high),     backgroundColor:'#f9731688',borderColor:'#f97316',borderWidth:1,stack:'s'},
-    {label:'Moderate', data:gp.map(p=>p.moderate), backgroundColor:'#eab30888',borderColor:'#eab308',borderWidth:1,stack:'s'},
-  ]);
-
-}
-
-// ── Trend tab ─────────────────────────────────────────────────────────────────
-// Reads TREND_SERIES (all snapshots compiled at build time) and ANNOTATIONS
-// (static event markers). Independent of the selected snapshot — always shows
-// the full history.
-function renderTrend() {
-  if (!TREND_SERIES || TREND_SERIES.length === 0) {
-    document.getElementById('trendKpiRow').innerHTML =
-      '<div class="card" style="grid-column:1/-1;text-align:center">' +
-      '<div class="kpi-label">No snapshots available</div></div>';
-    return;
-  }
-
-  const base    = TREND_SERIES[0];
-  const current = TREND_SERIES[TREND_SERIES.length - 1];
-  const labels  = TREND_SERIES.map(s => fmtDate(s.date));
-  const nSnaps  = TREND_SERIES.length;
-
-  document.getElementById('trendMeta').textContent =
-    'Baseline: ' + fmtDate(base.date) + '  ·  ' + nSnaps + ' snapshot' + (nSnaps > 1 ? 's' : '') + '  ·  All metrics: lower = better';
-
-  // Stat cards — delta from first snapshot to latest; lower is always better
-  document.getElementById('trendKpiRow').innerHTML = [
-    ['Inspector Critical', current.insp_crit,   base.insp_crit,   'c'],
-    ['Inspector High',     current.insp_high,   base.insp_high,   'h'],
-    ['Unique CVEs',        current.unique_cves, base.unique_cves, 'b'],
-    ['GH Security Total',  current.gh_total,    base.gh_total,    'b'],
-    ['Dependabot',         current.gh_vuln,     base.gh_vuln,     'h'],
-    ['Zone A CVEs',        current.zone_a_cves, base.zone_a_cves, 'g'],
-  ].map(([lbl, cur, bas, cls]) => {
-    const d   = cur - bas;
-    const pct = bas > 0 ? (Math.abs(d) / bas * 100).toFixed(1) : '0.0';
-    const dir = d > 0 ? '↑' : d < 0 ? '↓' : '→';
-    const dc  = d > 0 ? 'var(--crit)' : d < 0 ? 'var(--low)' : 'var(--muted)';
-    return `<div class="card">
-      <div class="kpi-label">${lbl}</div>
-      <div class="kpi-val ${cls}">${fmtN(cur)}</div>
-      <div class="kpi-sub" style="color:${dc}">${dir} ${fmtN(Math.abs(d))} (${pct}%) from baseline</div>
-    </div>`;
-  }).join('');
-
-  // Annotation vertical lines — shared across both charts
-  const annots = {};
-  (ANNOTATIONS || []).forEach(a => {
-    const lbl = fmtDate(a.date);
-    if (!labels.includes(lbl)) return;
-    annots['a' + a.date] = {
-      type: 'line', xMin: lbl, xMax: lbl,
-      borderColor: '#94a3b866', borderWidth: 1, borderDash: [4, 4],
-      label: {
-        display: true, content: a.label,
-        color: '#94a3b8', backgroundColor: '#1e293b',
-        font: { size: 9 }, position: 'start',
-      },
-    };
-  });
-
-  // Inspector chart: stacked bars (C + H) with Unique CVEs line on right axis
-  CHARTS['trendInsp']?.destroy();
-  CHARTS['trendInsp'] = new Chart(document.getElementById('trendInspChart'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          type: 'bar', label: 'Critical',
-          data: TREND_SERIES.map(s => s.insp_crit),
-          backgroundColor: '#ef444488', borderColor: '#ef4444', borderWidth: 1,
-          stack: 's', yAxisID: 'yL',
-        },
-        {
-          type: 'bar', label: 'High',
-          data: TREND_SERIES.map(s => s.insp_high),
-          backgroundColor: '#f9731688', borderColor: '#f97316', borderWidth: 1,
-          stack: 's', yAxisID: 'yL',
-        },
-        {
-          type: 'line', label: 'Unique CVEs',
-          data: TREND_SERIES.map(s => s.unique_cves),
-          borderColor: '#146bfa', backgroundColor: '#146bfa22',
-          borderWidth: 2, pointRadius: 5, pointBackgroundColor: '#146bfa',
-          tension: 0, yAxisID: 'yR',
-        },
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: {
-        x:  { grid: { color: '#334155' }, ticks: { color: '#e2e8f0', font: { size: 11 } } },
-        yL: {
-          type: 'linear', position: 'left', stacked: true,
-          grid: { color: '#334155' },
-          ticks: { color: '#94a3b8', font: { size: 10 },
-                   callback: v => v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v },
-          title: { display: true, text: 'Findings (C+H)', color: '#94a3b8', font: { size: 11 } },
-        },
-        yR: {
-          type: 'linear', position: 'right',
-          grid: { display: false },
-          ticks: { color: '#146bfa', font: { size: 10 },
-                   callback: v => v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v },
-          title: { display: true, text: 'Unique CVEs', color: '#146bfa', font: { size: 11 } },
-        },
-      },
-      plugins: {
-        legend:     { labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 10 } },
-        tooltip:    { ...DARK, callbacks: { label: i => ' ' + i.dataset.label + ': ' + fmtN(i.raw) } },
-        annotation: { annotations: annots },
-      },
-    },
-  });
-
-  // GitHub Source chart: Total + three source breakdowns on a single log Y axis.
-  // Log scale handles the 145 (Secrets) vs ~2,700 (Dependabot) range without a dual axis.
-  const ghTotalSeries = TREND_SERIES.map(s =>
-    (typeof s.gh_total === 'number') ? s.gh_total : (s.gh_vuln + s.gh_code + s.gh_secrets)
-  );
-  CHARTS['trendGh']?.destroy();
-  CHARTS['trendGh'] = new Chart(document.getElementById('trendGhChart'), {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Total (GitHub Overview)', data: ghTotalSeries,
-          borderColor: '#146bfa', backgroundColor: '#146bfa22',
-          borderWidth: 3, pointRadius: 5, tension: 0 },
-        { label: 'Dependabot Vulns', data: TREND_SERIES.map(s => s.gh_vuln),
-          borderColor: '#f97316', backgroundColor: '#f9731622',
-          borderWidth: 2, pointRadius: 4, tension: 0 },
-        { label: 'Code Scanning',    data: TREND_SERIES.map(s => s.gh_code),
-          borderColor: '#eab308', backgroundColor: '#eab30822',
-          borderWidth: 2, pointRadius: 4, tension: 0 },
-        { label: 'Secret Scanning',  data: TREND_SERIES.map(s => s.gh_secrets),
-          borderColor: '#ef4444', backgroundColor: '#ef444422',
-          borderWidth: 2, pointRadius: 4, tension: 0 },
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: {
-        x: { grid: { color: '#334155' }, ticks: { color: '#e2e8f0', font: { size: 11 } } },
-        y: {
-          // Linear, not logarithmic: these series are expected to reach 0
-          // (that's the success state) and Chart.js log axes cannot plot 0.
-          type: 'linear',
-          beginAtZero: true,
-          grid: { color: '#334155' },
-          ticks: { color: '#94a3b8', font: { size: 10 },
-                   callback: v => v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v },
-          title: { display: true, text: 'Open Alerts', color: '#94a3b8', font: { size: 11 } },
-        },
-      },
-      plugins: {
-        legend:     { labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 10 } },
-        tooltip:    { ...DARK, callbacks: { label: i => ' ' + i.dataset.label + ': ' + fmtN(i.raw) } },
-        annotation: { annotations: annots },
-      },
-    },
-  });
-
-  // GitHub Severity chart: mirrors GitHub Security Overview "Open alerts over time".
-  // Total + Critical/High/Medium/Low computed across all three sources.
-  renderGhSeverityChart(labels, annots);
-}
-
-// Render the GitHub Severity trend chart. Severity counts are computed across
-// all three sources (Dependabot + Code Scanning + Secrets) on a single log axis.
-function renderGhSeverityChart(labels, annots) {
-  const totalSeries = TREND_SERIES.map(s =>
-    (typeof s.gh_total === 'number') ? s.gh_total : (s.gh_vuln + s.gh_code + s.gh_secrets)
-  );
-  const critSeries = TREND_SERIES.map(s => s.gh_sev_critical);
-  const highSeries = TREND_SERIES.map(s => s.gh_sev_high);
-  const medSeries  = TREND_SERIES.map(s => s.gh_sev_medium);
-  const lowSeries  = TREND_SERIES.map(s => s.gh_sev_low);
-
-  CHARTS['trendGhSev']?.destroy();
-  CHARTS['trendGhSev'] = new Chart(document.getElementById('trendGhSevChart'), {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [
-        { label: 'Total (GitHub Overview)', data: totalSeries,
-          borderColor: '#146bfa', backgroundColor: '#146bfa22',
-          borderWidth: 3, pointRadius: 5, tension: 0 },
-        { label: 'Critical', data: critSeries,
-          borderColor: '#ec4899', backgroundColor: '#ec489922',
-          borderWidth: 2, pointRadius: 4, tension: 0 },
-        { label: 'High',     data: highSeries,
-          borderColor: '#f97316', backgroundColor: '#f9731622',
-          borderWidth: 2, pointRadius: 4, tension: 0 },
-        { label: 'Medium',   data: medSeries,
-          borderColor: '#eab308', backgroundColor: '#eab30822',
-          borderWidth: 2, pointRadius: 4, tension: 0 },
-        { label: 'Low',      data: lowSeries,
-          borderColor: '#94a3b8', backgroundColor: '#94a3b822',
-          borderWidth: 2, pointRadius: 4, tension: 0 },
-      ],
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      scales: {
-        x: { grid: { color: '#334155' }, ticks: { color: '#e2e8f0', font: { size: 11 } } },
-        y: {
-          // Linear, not logarithmic: these series are expected to reach 0
-          // (that's the success state) and Chart.js log axes cannot plot 0.
-          type: 'linear',
-          beginAtZero: true,
-          grid: { color: '#334155' },
-          ticks: { color: '#94a3b8', font: { size: 10 },
-                   callback: v => v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v },
-          title: { display: true, text: 'Open Alerts', color: '#94a3b8', font: { size: 11 } },
-        },
-      },
-      plugins: {
-        legend:     { labels: { color: '#94a3b8', font: { size: 11 }, boxWidth: 12, padding: 10 } },
-        tooltip:    { ...DARK, callbacks: { label: i => ' ' + i.dataset.label + ': ' + fmtN(i.raw) } },
-        annotation: { annotations: annots },
-      },
-    },
-  });
-}
-
-// ── Executive summary (separate fn to keep renderAll readable) ────────────────
-function renderExec(insp, gh, corr, rawTotal) {
-  const top1Qw    = (corr.pkg_quickwin||[])[0];
-  const top2Qw    = (corr.pkg_quickwin||[])[1];
-  const allSignals = (corr.convergence||[]).filter(r=>r.signal_count>=4);
-  const paradoxRepos = (corr.repo_ranking||[]).filter(r=>
-    (r.insp_crit+r.insp_high)>8000 && (r.gh_crit+r.gh_high)<=10
-  );
-
-  // P0 exec banner
-  if (gh.secrets_total > 0) {
-    const aws = gh.secrets_by_type.find(x=>x.type==='aws_access_key_id');
-    const db  = gh.secrets_by_type.find(x=>x.type==='mongodb_atlas_db_uri_with_credentials');
-    document.getElementById('execBanner').innerHTML =
-      `<div class="banner-p0" style="margin-bottom:24px"><div class="icon">⚠</div><div>
-         <div class="title">P0 — ${gh.secrets_total} credentials exposed in source code</div>
-         <div class="sub">${aws?aws.count+' AWS key pairs':''}${db?' · '+db.count+' production database URIs':''} — rotate before any other remediation work.</div>
-       </div></div>`;
-  } else {
-    document.getElementById('execBanner').innerHTML = '';
-  }
-
-  const findings = [
-    gh.secrets_total>0 ? {
-      title:`${gh.secrets_total} credentials exposed in source code`,
-      body:`AWS keys, DB URIs, and API tokens across ${gh.secrets_by_repo.length} repos. ${(gh.secrets_by_repo[0]||{}).repo||''} carries the highest concentration. Live exposures until rotated — not a vulnerability backlog item.`,
-      tag:'tag-p0', tagLabel:'P0 · Secret Scanning',
-    } : null,
-    paradoxRepos.length>0 ? (()=>{
-      const named=paradoxRepos.slice(0,2).map(r=>r.repo);
-      const rest=paradoxRepos.length-named.length;
-      const s=named.join(', ')+(rest>0?` and ${rest} other${rest>1?'s':''}`:'');
-      const top=paradoxRepos[0];
-      return {
-        title:`${s} rank high by score but are Zone B — image only`,
-        body:`${s} appear near the top of the combined ranking, yet their source code is almost clean on Dependabot (${top.repo}: ${fmtN(top.insp_crit+top.insp_high)} Inspector C+H vs ${fmtN(top.gh_crit+top.gh_high)} GitHub C+H). Every finding is in the deployed image, not application code. The same base image upgrade that covers 24 repos resolves all of ${paradoxRepos.length===1?'it':'them'}. The ranking reflects fan-out inflation, not a signal that these services need dedicated attention beyond the base image work.`,
-        tag:'tag-insp', tagLabel:'Inspector · Zone B only',
-      };
-    })() : null,
-    {title:`Raw findings (${fmt(rawTotal)}) reduce to ~${fmtN(insp.unique_cves)} unique CVEs`,
-     body:`Average fan-out is ${insp.fanout}×. Shared base-image layers typically dominate the raw count — see the Dominant Base Layers table in the posture report; one FROM change closes every finding tied to that layer across all repos that inherit it.`,
-     tag:'tag-insp', tagLabel:'Inspector V2'},
-    {title:`${fmtN(corr.zone_a_pkgs)} packages vulnerable in both deployed images and source code`,
-     body:`Zone A packages are confirmed end-to-end. A fix closes findings in Inspector and Dependabot simultaneously. ${fmtN(gh.vuln_total)} Dependabot alerts open.`,
-     tag:'tag-both', tagLabel:'Both Sources'},
-    allSignals.length>0 ? {
-      title:`${allSignals.map(r=>r.repo).join(', ')} flagged by all four security signals`,
-      body:`Inspector, Dependabot, Code Scanning, and Secret Scanning independently flag the same repo${allSignals.length>1?'s':''}. Highest-confidence indicator of systemic technical debt — not explainable by a shared base image.`,
-      tag:'tag-both', tagLabel:'Cross-source',
-    } : null,
-    {title:`${gh.code_total} SAST findings, ${gh.code_errors} errors`,
-     body:`Code scanning (CodeQL) active org-wide. ${(gh.cs_by_repo[0]||{}).repo||''} leads with ${(gh.cs_by_repo[0]||{}).count||0} alerts. SAST surfaces logic bugs that package scanners cannot detect.`,
-     tag:'tag-gh', tagLabel:'Code Scanning'},
-  ].filter(Boolean).slice(0,5);
-
-  const priorities = [
-    gh.secrets_total>0 ? {
-      title:'Rotate exposed credentials immediately',
-      body:`${gh.secrets_total} open alerts. Start with ${(gh.secrets_by_repo[0]||{}).repo||'the highest-concentration repo'} (${(gh.secrets_by_repo[0]||{}).count||0} alerts)${(gh.secrets_by_type[0]||{}).type?', dominated by '+(gh.secrets_by_type[0].type.replace(/_/g,' ')):''}. Independent of vulnerability sprint.`,
-      tag:'tag-p0', tagLabel:'P0 · Immediate',
-    } : null,
-    {title:'Upgrade the shared base image',
-     body:'Inspector findings concentrate in shared base layers — a base image upgrade (newer slim/distroless variant) closes them across every repo inheriting the layer. The Dominant Base Layers table in the posture report maps layers to repos.',
-     tag:'tag-insp', tagLabel:'Inspector · Sprint'},
-    top1Qw ? {
-      title:`Update ${top1Qw.pkg} across ${top1Qw.repos} repos (QW score ${fmtN(top1Qw.score)})`,
-      body:`Highest quick-win in Zone A. Closes ${fmtN(top1Qw.insp_ch)} Inspector C+H + ${fmtN(top1Qw.gh_ch)} GitHub C+H simultaneously. Fix available.`,
-      tag:'tag-both', tagLabel:`${top1Qw.label} · Days`,
-    } : null,
-    top2Qw ? {
-      title:`Update ${top2Qw.pkg} across ${top2Qw.repos} repos`,
-      body:`Second-highest quick-win. ${fmtN(top2Qw.insp_ch+top2Qw.gh_ch)} combined C+H. Can be batched with the ${top1Qw?top1Qw.pkg:''} sweep in a single dependency sprint.`,
-      tag:'tag-both', tagLabel:`${top2Qw.label} · Days`,
-    } : null,
-    (()=>{
-      const st=(corr.pkg_quickwin||[]).find(p=>p.label==='Structural');
-      return st ? {
-        title:`Migrate off ${st.pkg} (abandoned package)`,
-        body:`${st.pkg} is abandoned — no upstream fix will ever ship. ${fmtN(st.insp_ch+st.gh_ch)} combined C+H findings are permanent until it is replaced. Requires engineering design.`,
-        tag:'tag-insp', tagLabel:'Structural · Sprint+',
-      } : null;
-    })(),
-  ].filter(Boolean).slice(0,5);
-
-  const rows=(items,nc)=>items.map((it,i)=>`
-    <div class="exec-item">
-      <div class="exec-num ${nc}">${i+1}</div>
-      <div>
-        <div class="exec-title">${it.title}</div>
-        <div class="exec-body">${it.body}</div>
-        <span class="exec-tag ${it.tag}">${it.tagLabel}</span>
-      </div>
-    </div>`).join('');
-
-  document.getElementById('execFindings').innerHTML   = rows(findings,   'exec-num-f');
-  document.getElementById('execPriorities').innerHTML = rows(priorities, 'exec-num-p');
-}
-
-// ── Boot ──────────────────────────────────────────────────────────────────────
-renderAll();
+const RANK_WEIGHTS = __RANK_WEIGHTS__;
+const MOVED        = __MOVED__;
+const REGION       = __REGION__;
+const TREND_START  = __TREND_START__;
+const PUBLISHED_URL = __PUBLISHED_URL__;
+__APP_JS__
 </script>
 </body>
 </html>"""
@@ -1418,23 +639,96 @@ def build(corr_path: Path, reports_dir: Path) -> str:
     print(f"   {len(dates)} snapshot(s) embedded: {', '.join(dates)}", flush=True)
 
     trend_series = build_trend_series(all_snaps)
+    moved        = build_moved(reports_dir, dates, ORG, REGION)
 
-    html = HTML
-    html = html.replace("__SNAPSHOTS__",    json.dumps(all_snaps, default=str))
-    html = html.replace("__DATES__",        json.dumps(dates))
-    html = html.replace("__CURRENT_DATE__", json.dumps(slug))
-    html = html.replace("__TREND_SERIES__", json.dumps(trend_series))
-    html = html.replace("__ANNOTATIONS__",  json.dumps(ANNOTATIONS))
-    html = html.replace("'__ORG__'",        json.dumps(ORG))
-    html = html.replace("__TITLE__",        TITLE)
     # Account/region come from the snapshot data (posture_snapshot.py derives the
     # account via STS at collection time). Legacy snapshots pre-dating that field
     # fall back to the org name alone.
     acct   = data.get("account", "")
     region = data.get("region",  "")
     header = " · ".join(x for x in (acct, region, ORG) if x) or ORG
-    html = html.replace("__ORG_ACCOUNT__",  header)
-    return html
+    subs = {
+        "__SNAPSHOTS__":    js_literal(all_snaps),
+        "__DATES__":        js_literal(dates),
+        "__CURRENT_DATE__": js_literal(slug),
+        "__TREND_SERIES__": js_literal(trend_series),
+        "__ANNOTATIONS__":  js_literal(ANNOTATIONS),
+        "__RANK_WEIGHTS__": js_literal(RANK_WEIGHTS),
+        "__TOP_N__":        str(CONVERGENCE_TOP_N),
+        "__MOVED__":        js_literal(moved),
+        "__REGION__":       js_literal(REGION),
+        "__TREND_START__":  js_literal(TREND_START if re.fullmatch(r"\d{8}", TREND_START) else ""),
+        "__PUBLISHED_URL__": js_literal(published_url(reports_dir)),
+        "'__ORG__'":        js_literal(ORG),
+        "__TITLE__":        html_escape(TITLE),
+        "__ORG_ACCOUNT__":  html_escape(header),
+        "__APP_JS__":       page_js(),
+    }
+    return fill_placeholders(panel_links(HTML), subs)
+
+
+def slug_panel(title):
+    """core.js slugPanel(), for the card titles written into the page itself."""
+    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48]
+
+
+def panel_links(template):
+    """Give every card title an anchor and a share link. Runs on the template, before
+    any data goes in, so only titles written here get one. Two cards with one slug
+    would share a link, so that stops the build."""
+    seen = set()
+
+    def link(m):
+        sid = slug_panel(m.group(1))
+        if not sid or sid in seen or re.fullmatch(r"\d{8}", sid):
+            raise ValueError(f"card title {m.group(1)!r} gives no unique section id ({sid!r})")
+        seen.add(sid)
+        return (f'<div class="card-title" data-panel="{sid}">{m.group(1)}<button type="button" class="panel-link" '
+                f'title="Copy a link to this section" onclick="sharePanel(\'{sid}\')">🔗</button></div>')
+    return re.sub(r'<div class="card-title">([^<]*)</div>', link, template)
+
+
+def published_url(reports_dir):
+    """The deployed /exec URL from clasp-projects.json, or "" (a local build, or no
+    usable deploy config). Only an Apps Script URL is accepted: it becomes the base
+    of every copied link."""
+    try:
+        url = json.loads((Path(reports_dir) / "clasp-projects.json").read_text()).get("url") or ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return url if isinstance(url, str) and re.fullmatch(r"https://script\.google\.com/macros/s/[\w-]+/exec", url) else ""
+
+
+JS_DIR = Path(__file__).resolve().parent / "dashboard"
+# Load order matters: helpers, page logic, the What moved panel, then first paint.
+JS_FILES = ("core.js", "app.js", "moved.js", "boot.js")
+
+
+def page_js(js_dir=JS_DIR):
+    """The page's JavaScript, read from scripts/dashboard/ and inlined so the page
+    stays one self-contained file. A file that could end the <script> block early
+    stops the build."""
+    parts = []
+    for name in JS_FILES:
+        src = (js_dir / name).read_text()
+        if re.search(r"</script", src, re.I):
+            raise ValueError(f"{name} contains '</script' and would end the page's script block")
+        parts.append(src.rstrip("\n"))
+    return "\n\n".join(parts)
+
+
+def js_literal(obj):
+    """JSON for a <script> block. Escaping <, > and & as \\u sequences keeps a data
+    string such as `</script>` from ending the block; JSON reads them back unchanged."""
+    return (json.dumps(obj, default=str)
+            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+
+
+def fill_placeholders(template, subs):
+    """Substitute every placeholder in one pass, so text inserted from the data is
+    never scanned for placeholders itself."""
+    pattern = re.compile("|".join(re.escape(k) for k in sorted(subs, key=len, reverse=True)))
+    return pattern.sub(lambda m: subs[m.group(0)], template)
 
 
 def main():

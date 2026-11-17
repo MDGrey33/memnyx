@@ -96,7 +96,7 @@ ok "AWS profile $AWS_PROFILE_CFG"
 
 # ── Pipeline ───────────────────────────────────────────────────────────────────
 echo ""
-echo "→ Inspector V2 snapshot (~3 min)..."
+echo "→ Inspector V2 snapshot (several minutes, more on a cold run: first-seen, rebuild comparison, package managers, lever breakdown, host release)..."
 python3 "$SCRIPT_DIR/posture_snapshot.py" --save --raw || fail "posture_snapshot.py failed"
 ok "Inspector snapshot saved"
 
@@ -114,6 +114,16 @@ echo ""
 echo "→ Building dashboard..."
 python3 "$SCRIPT_DIR/build_dashboard.py" || fail "build_dashboard.py failed"
 ok "Dashboard built"
+
+echo ""
+echo "→ Movement since the previous snapshot (reads the snapshot.json just built)..."
+# Warn, don't fail: a missing movement file must not cost the snapshot itself.
+if python3 "$SCRIPT_DIR/emit_movement.py" --reports-dir "$REPORTS_DIR"; then
+  ok "Movement written"
+else
+  echo "  WARN: emit_movement.py failed — snapshot is complete, movement.md is not" >&2
+fi
+echo "   Why it moved: not written by this script — /security-snapshot Step 6 writes it."
 
 # ── Done ───────────────────────────────────────────────────────────────────────
 echo ""

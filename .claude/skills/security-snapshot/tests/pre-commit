@@ -1,0 +1,22 @@
+#!/bin/sh
+# Run the skill's test suite before every commit; block the commit on failure.
+# Mutants (tests/run_mutants.py) stay manual — they take about a minute.
+# Works with the skill as its own repo or under .claude/skills/ in a larger one;
+# in a larger repo it runs only when the commit touches the skill.
+top="$(git rev-parse --show-toplevel)" || exit 1
+if [ -f "$top/SKILL.md" ] && [ -f "$top/tests/pre-commit" ]; then
+  skill="$top"
+else
+  skill="$top/.claude/skills/security-snapshot"
+  [ -d "$skill/tests" ] || { echo "pre-commit: no security-snapshot skill under $top" >&2; exit 1; }
+  git diff --cached --quiet -- "$skill" && exit 0
+fi
+log="$(mktemp)" || exit 1
+trap 'rm -f "$log"' EXIT
+cd "$skill" || exit 1
+if ! PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests >"$log" 2>&1; then
+  echo "pre-commit: security-snapshot test suite failed — commit blocked. Output:" >&2
+  tail -30 "$log" >&2
+  exit 1
+fi
+echo "pre-commit: security-snapshot $(grep -E '^Ran [0-9]+ tests?' "$log")"
