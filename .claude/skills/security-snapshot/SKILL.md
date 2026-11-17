@@ -228,7 +228,14 @@ only the first, so mention Fargate in the note if the account runs it. The page 
 readers who do not know registry terms: "uploaded" not "pushed", "built for several chip types"
 not "multi-architecture index". Each row says why it lapses: a Lambda, a build for one chip type
 under an image the cluster runs, or the last use Inspector recorded (the upload date or last
-pull when the account rescans by pull date). `trend_start` in config sets where the trend line begins.
+pull when the account rescans by pull date). When the account rescans by pull date, each row also shows its last
+pull: Lambda fetches a function's image periodically, so an idle Lambda shows up as its last pull
+ages. "Never pulled" appears only when ECR's details for the image were read and carry no pull;
+without them the row says the pull date is not recorded. A row that lapsed although its pulls are
+recent says it stopped before them and to redeploy a fresh build: AWS documents that an image
+Inspector stopped stays stopped when the upload window grows, and whether a pull restarts it is
+unconfirmed until the first snapshot after a switch to pull date. Only a lapsed row carries a
+lapse date; an image Inspector never rescanned (an unsupported OS, say) shows its status instead. `trend_start` in config sets where the trend line begins.
 
 Every section heading carries a 🔗 that copies a link to that section (`#<tab>/<snapshot>[/<basis>]/<section>`).
 On Apps Script the page cannot read its own address, so the build takes the link's base from

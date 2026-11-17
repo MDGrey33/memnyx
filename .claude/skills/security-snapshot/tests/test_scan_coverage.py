@@ -193,8 +193,15 @@ class TestScanCoverage(unittest.TestCase):
         self.assertEqual([(r["function"], r["status"]) for r in rows], [("fn-b", "INACTIVE"), ("fn-b:aliases", "UNREAD")])
 
     def test_an_image_covered_under_another_repo_is_still_found(self):
-        (f,) = self.capture(lam=Lambda([("fn-x", "Image", uri("other/repo", D["b"]))]))["functions"]
+        pulled = T0 - timedelta(days=5)
+        ecr = Ecr([detail("ns/a", D["a"]), detail("ns/b", D["b"], pushed=T0 - timedelta(days=90), pulled=pulled)])
+        (f,) = self.capture(ecr=ecr, lam=Lambda([("fn-x", "Image", uri("other/repo", D["b"]))]))["functions"]
         self.assertEqual((f["status"], f["reason"]), ("INACTIVE", "SCAN_ELIGIBILITY_EXPIRED"))
+        # Its dates come from the same copy as its status, not from its own repo.
+        self.assertEqual((f["pushed_at"], f["last_pulled_at"]),
+                         ((T0 - timedelta(days=90)).isoformat(), pulled.isoformat()))
+        (f,) = self.capture(lam=Lambda([("fn-x", "Image", uri("ns/x", D["amd"]))]))["functions"]
+        self.assertEqual((f["pushed_at"], f["last_pulled_at"]), (None, None))
 
     def test_a_digest_in_two_repos_takes_the_copy_still_rescanned(self):
         # The lapsed copy sits in the repo that sorts first, so "first listed" picks it.
@@ -247,9 +254,12 @@ class TestScanCoverage(unittest.TestCase):
         self.assertIsNone(r["images"][0]["platforms"])
 
 
-def image(repo, digest, status="ACTIVE", reason="SUCCESSFUL", in_use=None, lapse=None, index=False, platforms=None):
+def image(repo, digest, status="ACTIVE", reason="SUCCESSFUL", in_use=None, lapse=None, index=False, platforms=None,
+          pulled=None, pushed=None):
+    # pushed: the image's ECR details were read. Without it a missing pull is unknown.
     return {"repo": repo, "digest": digest, "status": status, "reason": reason, "in_use_count": in_use,
-            "lapse_at": lapse.isoformat() if lapse else None, "index": index, "platforms": platforms}
+            "lapse_at": lapse.isoformat() if lapse else None, "index": index, "platforms": platforms,
+            "pushed_at": pushed, "last_pulled_at": pulled}
 
 
 def snap(images, functions=(), at="2026-11-06 16:00 UTC", archs=("x86_64",), node_status="ok", others=0, other_archs=()):
@@ -341,7 +351,8 @@ class TestPageRows(unittest.TestCase):
         rows = {r["name"]: r for r in v["not_scanned"]}
         self.assertEqual(rows["fn-1"], {"kind": "Lambda", "name": "fn-1", "image": "ns/l@" + "a" * 12,
                                         "why": "rescanning lapsed: a Lambda, which Inspector never sees as running",
-                                        "lapse": "2026-08-01"})
+                                        "lapse": "2026-08-01", "pulled": None,
+                                        "stopped_earlier": False})
         self.assertEqual(rows["fn-2"]["why"], "Inspector has no record of this image")
         self.assertIn("could not be read", rows["ns/i"]["why"])
         unread = mp._scan_gaps({"scan_gaps": mv.scan_gaps(snap([], [{"function": "fn-3", "repo": None, "digest": None,
@@ -371,7 +382,86 @@ class TestPageRows(unittest.TestCase):
         # Rescanning by pull date credits pulls, so neither cause applies.
         g["windows"] = {**W30, "mode": "LAST_PULL_DATE"}
         pulled = {r["name"]: r["why"] for r in mp._scan_gaps({"scan_gaps": g})["lapsing"]}
-        self.assertEqual(set(pulled.values()), {"rescanning follows its upload date or last pull"})
+        # No ECR details in this fixture, so a missing pull says nothing.
+        self.assertEqual(set(pulled.values()), {"pull date not recorded"})
+
+    def test_by_pull_date_each_row_shows_its_last_pull(self):
+        # Rescanning by pull date: the last pull is what keeps an image rescanned,
+        # so each row says when it was, and an idle Lambda shows up by its date.
+        soon, later = AT + timedelta(days=5), AT + timedelta(days=50)
+        g = mv.scan_gaps(snap(
+            [image("ns/l", D["a"], lapse=soon, pulled="2026-09-12T11:53:00+00:00"),
+             image("ns/x", D["b"], status="INACTIVE", reason="SCAN_ELIGIBILITY_EXPIRED", lapse=later,
+                   pulled="2026-11-05T11:53:00+00:00"),
+             image("ns/run", D["amd"], in_use=1, lapse=soon, pushed="2026-10-20T00:00:00+00:00"),
+             image("ns/i", D["idx"], in_use=1, index=True, platforms=[{"digest": D["att"], "platform": "linux/amd64"}]),
+             image("ns/i", D["att"], lapse=soon, pulled="2026-11-04T22:00:00+00:00"),
+             image("ns/old", D["arm"], in_use=1, status="INACTIVE", reason="SCAN_ELIGIBILITY_EXPIRED",
+                   lapse=AT - timedelta(days=3), pulled="2026-08-01T00:00:00+00:00")],
+            [{"function": "fn-idle", "repo": "ns/l", "digest": D["a"], "status": "ACTIVE",
+              "reason": "SUCCESSFUL", "lapse_at": soon.isoformat()},
+             # Captured under another repo: the row carries that copy's dates.
+             {"function": "fn-copy", "repo": "ns/nowhere", "digest": D["a"], "status": "ACTIVE",
+              "reason": "SUCCESSFUL", "lapse_at": soon.isoformat(),
+              "pushed_at": "2026-09-01T00:00:00+00:00", "last_pulled_at": "2026-10-30T11:53:00+00:00"},
+             {"function": "fn-unread", "repo": "ns/nowhere", "digest": D["b"], "status": "ACTIVE",
+              "reason": "SUCCESSFUL", "lapse_at": soon.isoformat(), "pushed_at": None, "last_pulled_at": None},
+             {"function": "fn-stuck", "repo": "ns/x", "digest": D["b"], "status": "INACTIVE",
+              "reason": "SCAN_ELIGIBILITY_EXPIRED", "lapse_at": later.isoformat()},
+             {"function": "fn-gone", "repo": "ns/old", "digest": D["arm"], "status": "INACTIVE",
+              "reason": "SCAN_ELIGIBILITY_EXPIRED", "lapse_at": (AT - timedelta(days=3)).isoformat()}]))
+        g["windows"] = {"push": "DAYS_30", "use": "DAYS_60", "mode": "LAST_PULL_DATE"}
+        v = mp._scan_gaps({"scan_gaps": g})
+        lapsing = {r["name"]: (r["why"], r["pulled"]) for r in v["lapsing"]}
+        self.assertEqual(lapsing, {"fn-idle": ("last pulled 2026-09-12", "2026-09-12"),
+                                   "fn-copy": ("last pulled 2026-10-30", "2026-10-30"),
+                                   "fn-unread": ("pull date not recorded", None),
+                                   "ns/run": ("never pulled since upload", None),
+                                   "ns/i (linux/amd64)": ("last pulled 2026-11-04", "2026-11-04")})
+        stopped = {r["name"]: (r["why"], r["pulled"]) for r in v["not_scanned"]}
+        # Lapsed, yet its pulls say it should still be rescanned: pulls will not restart it.
+        self.assertEqual(stopped["fn-stuck"], ("rescanning stopped before its recent pulls; "
+                                               "redeploy a fresh build to restart it", "2026-11-05"))
+        # Its computed lapse date is in the future; it never shows under "lapsed".
+        row = next(r for r in v["not_scanned"] if r["name"] == "fn-stuck")
+        self.assertEqual((row["lapse"], row["stopped_earlier"]), (None, True))
+        old = next(r for r in v["not_scanned"] if r["name"] == "ns/old")
+        self.assertEqual((old["lapse"], old["stopped_earlier"]), ("2026-11-03", False))
+        # Lapsed, and its last pull is past the window too: the plain wording.
+        self.assertEqual(stopped["ns/old"], ("rescanning lapsed", "2026-08-01"))
+        # A pull credits a Lambda like any image, so the running-mode cause is not given.
+        self.assertEqual(stopped["fn-gone"], ("rescanning lapsed", "2026-08-01"))
+        # No mode recorded: the dates decide, and neither running-mode cause applies.
+        g["windows"] = {"push": "DAYS_30", "use": "DAYS_60", "mode": None}
+        unset = {r["name"]: r["why"] for r in mp._scan_gaps({"scan_gaps": g})["lapsing"]}
+        self.assertEqual(unset["fn-idle"], "rescanning follows its upload date or last pull")
+        self.assertEqual(unset["ns/i (linux/amd64)"], "rescanning follows its upload date or last pull")
+        # Running mode keeps its wording and shows no pull date.
+        g["windows"] = W30
+        for r in mp._scan_gaps({"scan_gaps": g})["lapsing"] + mp._scan_gaps({"scan_gaps": g})["not_scanned"]:
+            self.assertIsNone(r["pulled"])
+            self.assertNotIn("pulled", r["why"])
+
+    def test_only_a_lapsed_image_is_dated_or_said_to_have_stopped_earlier(self):
+        # Never rescanned (unsupported OS, too large): no lapse to date, past or future.
+        ahead, past = AT + timedelta(days=20), AT - timedelta(days=20)
+        for mode in ("LAST_IN_USE_AT", "LAST_PULL_DATE"):
+            for lapse in (ahead, past):
+                g = mv.scan_gaps(snap([image("ns/os", D["a"], "INACTIVE", "UNSUPPORTED_OS", in_use=1, lapse=lapse),
+                                       image("ns/big", D["b"], "INACTIVE", "IMAGE_SIZE_EXCEEDED", in_use=1, lapse=lapse)]))
+                g["windows"] = {**W30, "mode": mode}
+                rows = {r["name"]: (r["lapse"], r["stopped_earlier"], r["why"])
+                        for r in mp._scan_gaps({"scan_gaps": g})["not_scanned"]}
+                self.assertEqual(rows, {"ns/os": (None, False, "unsupported os"),
+                                        "ns/big": (None, False, "image size exceeded")}, (mode, lapse))
+
+    def test_timestamps_are_compared_as_times_not_text(self):
+        self.assertTrue(mp._later("2026-11-20T00:00:00Z", "2026-11-17T09:00:00+00:00"))
+        self.assertFalse(mp._later("2026-11-17T08:00:00+00:00", "2026-11-17T09:00:00Z"))
+        # Text order says later (the 1 sorts after the 0); the times say an hour earlier.
+        self.assertFalse(mp._later("2026-11-17T10:00:00+01:00", "2026-11-17T09:30:00+00:00"))
+        self.assertFalse(mp._later(None, "2026-11-17T09:00:00+00:00"))
+        self.assertFalse(mp._later("not a date", "2026-11-17T09:00:00+00:00"))
 
     def test_no_capture_no_panel(self):
         self.assertIsNone(mp._scan_gaps({"scan_gaps": None}))

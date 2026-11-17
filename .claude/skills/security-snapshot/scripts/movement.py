@@ -424,17 +424,25 @@ def scan_gaps(curr):
     if not isinstance(sc, dict) or not isinstance(sc.get("images"), list) or at is None:
         return None
     soon = at + timedelta(days=LAPSE_SOON_DAYS)
-    running = [{"kind": "lambda", "name": f["function"], "repo": f.get("repo"), "digest": f.get("digest"),
-                "status": f.get("status"), "reason": f.get("reason"), "lapse_at": f.get("lapse_at")}
-               for f in sc.get("functions") or []]
     by_digest = {(i["repo"], i["digest"]): i for i in sc["images"]}
+    # The last pull rides along: by pull date it is what keeps an image rescanned.
+    # pushed_at says the image's ECR details were read, so a missing pull is known.
+    # A function row carries both from the copy its status came from; older rows
+    # do not, and fall back to their own repository.
+    def _dates(f):
+        src = f if "pushed_at" in f else by_digest.get((f.get("repo"), f.get("digest"))) or {}
+        return {"pushed_at": src.get("pushed_at"), "last_pulled_at": src.get("last_pulled_at")}
+    running = [{"kind": "lambda", "name": f["function"], "repo": f.get("repo"), "digest": f.get("digest"),
+                "status": f.get("status"), "reason": f.get("reason"), "lapse_at": f.get("lapse_at"), **_dates(f)}
+               for f in sc.get("functions") or []]
     archs = _node_archs(curr)
     for i in sc["images"]:
         if not (i.get("in_use_count") or 0) > 0:
             continue
         if not i.get("index"):
             running.append({"kind": "cluster", "name": i["repo"], "repo": i["repo"], "digest": i["digest"],
-                            "status": i.get("status"), "reason": i.get("reason"), "lapse_at": i.get("lapse_at")})
+                            "status": i.get("status"), "reason": i.get("reason"), "lapse_at": i.get("lapse_at"),
+                            "pushed_at": i.get("pushed_at"), "last_pulled_at": i.get("last_pulled_at")})
         elif i.get("platforms") is None:
             # A running index whose platform images could not be read: unknown, so listed.
             running.append({"kind": "cluster", "name": i["repo"], "repo": i["repo"], "digest": i["digest"],
@@ -450,7 +458,9 @@ def scan_gaps(curr):
                 running.append({"kind": "cluster", "name": f"{i['repo']} ({pl.get('platform') or 'unknown platform'})",
                                 "repo": i["repo"], "digest": pl.get("digest"),
                                 "status": c.get("status", "NOT_IN_COVERAGE"), "reason": c.get("reason"),
-                                "lapse_at": c.get("lapse_at"), "index_platform": True})
+                                "lapse_at": c.get("lapse_at"), "pushed_at": c.get("pushed_at"),
+                                "last_pulled_at": c.get("last_pulled_at"),
+                                "index_platform": True})
     not_scanned, lapsing = [], []
     for r in running:
         if r["status"] != "ACTIVE":

@@ -22,6 +22,7 @@ import json
 import math
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -532,7 +533,32 @@ def _no_use_credit(r, mode):
     return None
 
 
-def _gap_why(r, mode):
+def _later(a, b):
+    """True when timestamp a is after b. Parsed, not compared as text, so a change
+    of format (a Z suffix, no fraction) cannot misorder them."""
+    try:
+        return bool(a and b) and datetime.fromisoformat(a.replace("Z", "+00:00")) > datetime.fromisoformat(b.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+
+
+def _stopped_earlier(r, as_of):
+    """Rescanning lapsed, yet the lapse date computed from today's dates is still
+    ahead: it stopped on a date nothing records (before recent pulls, or under
+    earlier settings). Only an expired image lapsed; others were never rescanned."""
+    return r.get("reason") == "SCAN_ELIGIBILITY_EXPIRED" and _later(r.get("lapse_at"), as_of)
+
+
+def _pull_text(r):
+    pulled = (r.get("last_pulled_at") or "")[:10]
+    if pulled:
+        return f"last pulled {pulled}"
+    # ECR leaves the pull time out for an image never pulled; without the image's
+    # details (no upload date either) the absence means nothing.
+    return "never pulled since upload" if r.get("pushed_at") else "pull date not recorded"
+
+
+def _gap_why(r, mode, as_of=None):
     status, cause = r.get("status"), _no_use_credit(r, mode)
     if status == "NOT_IN_COVERAGE":
         return "Inspector has no record of this image"
@@ -541,21 +567,34 @@ def _gap_why(r, mode):
     if status == "UNREAD":
         return f"could not be read ({r.get('reason')})"
     if r.get("reason") == "SCAN_ELIGIBILITY_EXPIRED":
+        if mode == "LAST_PULL_DATE" and _stopped_earlier(r, as_of):
+            return "rescanning stopped before its recent pulls; redeploy a fresh build to restart it"
         return "rescanning lapsed" + (f": {cause}" if cause else "")
     if status == "ACTIVE":
         # Still rescanned. SUCCESSFUL says nothing here; any other reason is kept.
-        why = cause or ("rescanning follows the last time Inspector saw it running" if mode == "LAST_IN_USE_AT"
-                        else "rescanning follows its upload date or last pull")
+        if mode == "LAST_PULL_DATE":
+            why = _pull_text(r)
+        else:
+            why = cause or ("rescanning follows the last time Inspector saw it running" if mode == "LAST_IN_USE_AT"
+                            else "rescanning follows its upload date or last pull")
         reason = r.get("reason")
         return why if not reason or reason == "SUCCESSFUL" else f"{why} ({reason.replace('_', ' ').lower()})"
     return (r.get("reason") or status or "").replace("_", " ").lower()
 
 
-def _gap_row(r, mode=None):
+def _gap_row(r, mode=None, as_of=None):
+    # A date shows only where it means something: the coming lapse of a rescanned
+    # image, or the past lapse of an expired one. An image never rescanned (an
+    # unsupported OS, say) has no lapse, and one that stopped earlier has no date.
+    stopped_earlier = _stopped_earlier(r, as_of)
+    dated = r.get("status") == "ACTIVE" or (r.get("reason") == "SCAN_ELIGIBILITY_EXPIRED" and not stopped_earlier)
     return {"kind": "Lambda" if r["kind"] == "lambda" else "Cluster", "name": r["name"],
             "image": (f"{r['repo']}@{(r.get('digest') or '').removeprefix('sha256:')[:12]}" if r.get("repo") else "–"),
-            "why": _gap_why(r, mode),
-            "lapse": (r.get("lapse_at") or "")[:10] or None}
+            "why": _gap_why(r, mode, as_of),
+            "lapse": ((r.get("lapse_at") or "")[:10] or None) if dated else None,
+            "stopped_earlier": stopped_earlier,
+            # Shown by pull date only, where the last pull is what renews rescanning.
+            "pulled": ((r.get("last_pulled_at") or "")[:10] or None) if mode == "LAST_PULL_DATE" else None}
 
 
 def _scan_gaps(mv):
@@ -565,8 +604,8 @@ def _scan_gaps(mv):
     w = g.get("windows") or {}
     return {"running": g["running"], "soon_days": g["soon_days"], "functions_measured": g["functions_measured"],
             "push_days": _days(w.get("push")), "use_days": _days(w.get("use")), "mode": w.get("mode"),
-            "not_scanned": [_gap_row(r, w.get("mode")) for r in g["not_scanned"]],
-            "lapsing": [_gap_row(r, w.get("mode")) for r in g["lapsing"]]}
+            "not_scanned": [_gap_row(r, w.get("mode"), g.get("as_of")) for r in g["not_scanned"]],
+            "lapsing": [_gap_row(r, w.get("mode"), g.get("as_of")) for r in g["lapsing"]]}
 
 
 def page_view(mv, detail, note_md="", allow=None):

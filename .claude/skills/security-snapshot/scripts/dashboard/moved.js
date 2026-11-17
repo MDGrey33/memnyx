@@ -164,7 +164,7 @@ function mvLevers(levers) {
 function mvGapRow(r, lapseLabel) {
   return `<div class="mv-item"><div><div class="mv-item-n">${esc(r.name)} <span class="mv-owner">${esc(r.kind)}</span></div>
     <div class="mv-item-d"><code>${esc(r.image)}</code> · ${esc(r.why)}</div></div>
-    <div class="mv-num" data-lapse>${r.lapse ? esc(lapseLabel) + ' ' + esc(r.lapse) : 'no date'}</div><div class="mv-acts"></div></div>`;
+    <div class="mv-num" data-lapse>${r.lapse ? esc(lapseLabel) + ' ' + esc(r.lapse) : r.stopped_earlier ? 'lapsed earlier' : 'no date'}${r.pulled ? `<div class="mv-pulled" data-pulled>pulled ${esc(r.pulled)}</div>` : ''}</div><div class="mv-acts"></div></div>`;
 }
 
 // Each list is its own card, toned by severity, so the two never read as one list.
@@ -184,7 +184,7 @@ function mvScanGaps(g) {
   const push = g.push_days == null ? 'for as long as it stays in ECR' : `for ${esc(g.push_days)} days after it is uploaded to ECR`;
   const use = g.use_days == null ? '' : g.mode === 'LAST_IN_USE_AT'
     ? ` It keeps rescanning while it sees the image running on the cluster, until ${esc(g.use_days)} days after it last did.`
-    : ` It also keeps rescanning until ${esc(g.use_days)} days after the image was last pulled.`;
+    : ` It also keeps rescanning until ${esc(g.use_days)} days after the image was last pulled. A pull is recorded each time a cluster node downloads the image, and each time Lambda fetches a function's image, which it does periodically. A Lambda not invoked for several weeks goes inactive and may stop fetching it; its image then stops being rescanned ${esc(g.use_days)} days after the last pull. Each row shows its last pull.`;
   // "Running" here is what this panel sees; "in use" is what Inspector credits. Two
   // running workloads earn no credit, which is how a running image stops being rescanned.
   const lambda = g.mode === 'LAST_IN_USE_AT' && g.push_days != null

@@ -461,7 +461,7 @@ def _function_row(lam, name, qualifier, images):
         g = lam.get_function(FunctionName=name, **({"Qualifier": qualifier} if qualifier else {}))
     except AWS_ERRORS as e:
         return {"function": label, "repo": None, "digest": None, "last_modified": None,
-                "status": "UNREAD", "reason": _code(e), "lapse_at": None}
+                "status": "UNREAD", "reason": _code(e), "lapse_at": None, "pushed_at": None, "last_pulled_at": None}
     repo, digest = _image_ref((g.get("Code") or {}).get("ResolvedImageUri"))
     # Same repo first; then the same digest in any repo Inspector covers it under,
     # preferring a copy still rescanned (the content is what is scanned), then the
@@ -473,7 +473,9 @@ def _function_row(lam, name, qualifier, images):
             "last_modified": (g.get("Configuration") or {}).get("LastModified"),
             # NOT_IN_COVERAGE: Inspector has no record of the image at all.
             "status": i["status"] if i else "NOT_IN_COVERAGE",
-            "reason": i["reason"] if i else None, "lapse_at": i["lapse_at"] if i else None}
+            "reason": i["reason"] if i else None, "lapse_at": i["lapse_at"] if i else None,
+            # From the same copy as the status, so the pull date matches the lapse date.
+            "pushed_at": i["pushed_at"] if i else None, "last_pulled_at": i["last_pulled_at"] if i else None}
 
 
 def _function_rows(lam, name, images):

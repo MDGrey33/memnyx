@@ -452,6 +452,7 @@ a.repo-link:hover{color:var(--primary);border-bottom-color:var(--primary)}
 .mv-gap-h::before{content:'';width:10px;height:10px;border-radius:50%;background:var(--tone);flex:none}
 .mv-gap-n{font-size:12px;font-weight:700;color:var(--tone);background:color-mix(in srgb,var(--tone) 16%,transparent);border:1px solid color-mix(in srgb,var(--tone) 45%,transparent);padding:1px 10px;border-radius:999px}
 .mv-gap-card .mv-num{color:var(--tone);font-weight:600}
+.mv-pulled{color:var(--muted);font-weight:400;font-size:11.5px}
 .dtag-basis{background:#f59e0b22;color:#fbbf24;border:1px solid #f59e0b55}
 .dtag-note{background:#a78bfa22;color:#c4b5fd;border:1px solid #a78bfa55}
 .mv-lever h3{font-size:15px;font-weight:600;line-height:1.35}

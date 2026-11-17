@@ -508,6 +508,14 @@ test('running but not scanned: each state is keyed in data-gaps and lists its ro
   assert.doesNotMatch(clear, /could not be read/);
   const pulled = gaps(GAPS({ mode: 'LAST_PULL_DATE' }));
   assert.match(pulled, /until 30 days after the image was last pulled/);
+  // By pull date an idle Lambda can lapse; the rule says so, and each row shows its last pull.
+  assert.match(pulled, /A Lambda not invoked for several weeks goes inactive and may stop fetching it; its image then stops being rescanned 30 days after the last pull\./);
+  assert.doesNotMatch(clear, /goes inactive/);  // running mode: no pull sentence
+  const idle = gaps(GAPS({ mode: 'LAST_PULL_DATE', lapsing: [{ ...gapRow('fn-03', 'Lambda', 'last pulled 2026-09-12', '2026-11-11'), pulled: '2026-09-12' }] }));
+  assert.match(idle, /data-lapse>lapses 2026-11-11<div class="mv-pulled" data-pulled>pulled 2026-09-12<\/div><\/div>/);
+  assert.doesNotMatch(bad, /data-pulled/);  // rows without a pull date show none
+  const earlier = gaps(GAPS({ mode: 'LAST_PULL_DATE', not_scanned: [{ ...gapRow('fn-04', 'Lambda', 'rescanning stopped earlier', null), stopped_earlier: true }] }));
+  assert.match(earlier, /data-lapse>lapsed earlier</);  // never a future date under "lapsed"
   assert.doesNotMatch(pulled, /never sees two kinds/);  // pull mode credits pulls
   assert.equal(gaps(null), '');
   const esc = gaps(GAPS({ not_scanned: [gapRow('<b>x</b>', 'Lambda', '<i>y</i>', null)] }));
