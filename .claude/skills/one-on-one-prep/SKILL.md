@@ -9,6 +9,15 @@ args: "Member name and optional time range. Examples: 'Alice Chen', 'Alice Chen 
 
 Synthesize a team member's recent activity from daily activity files into a structured meeting prep document. This is a **synthesis skill** — it reads raw data collected by `/collect-team-activity`, it does not collect data itself.
 
+## Model Selection
+
+Advisory: this section does not switch the session model. See `.claude/skills/_shared/MODEL_SELECTION.md` for tier definitions.
+
+- **Default model:** Sonnet. Turning raw activity into discussion points about a person is synthesis with consequences for how they are read.
+- **Deterministic parts (no LLM):** finding the activity files for the member and date range.
+- **Demote to Haiku when:** never.
+- **Promote to Opus when:** the user asks for it, for example ahead of a performance or growth conversation.
+
 ## Privacy posture
 
 Input files under `<workspace>/collected/` may contain private Slack channel content, internal Jira tickets, and other non-public material gathered by `/collect-team-activity`. The synthesised prep document this skill produces lands on the caller's local disk under `<workspace>/artifacts/one-on-one-prep/`. Intended for the caller's own 1:1 preparation with their direct reports — do not generate prep for members outside your direct report scope, and treat the output as confidential.
@@ -87,6 +96,7 @@ Input files under `<workspace>/collected/` may contain private Slack channel con
      - `execution: status-change` — include as delivery evidence; the member drove this
      - `execution: commented` — lighter engagement signal; include if the comment shaped the outcome
      - `execution: none` — **awareness/planning signal only.** Do NOT surface as stalled delivery or "no movement." For leadership roles, tickets are frequently assigned for routing, awareness, or sprint-queue purposes, not for the assignee to execute personally. State the ticket is in queue if relevant; do not imply the member should have acted.
+     - `execution: unverified` — the collector could not read every comment in the window. Treat it as unknown, never as `none`: leave it out of delivery evidence and don't raise it as inactivity.
    - **Reporter-only tickets** (`## Jira — Filed (reporter-only)` or `## Filed (reporter-only)` sections in the activity file) must NOT appear in Completed or In Progress. Surface them in a separate **Sprint Portfolio** section after Discussion Candidates — a brief table (key, summary, assignee, status). These are planning/oversight signals: the member created the work and delegated it to an IC. Delivery credit belongs on the IC's report.
 
    **Patterns & Observations**

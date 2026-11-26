@@ -9,13 +9,22 @@ args: "Optional date or date range (e.g., '2026-04-11', '2026-04-07 to 2026-04-1
 
 Collect the user's work activity for a given day (or date range) from all available data sources (Slack, Jira, Confluence, GitHub, Google Drive). Every item must include a source link. Output is written to `<workspace>/collected/`.
 
+## Model Selection
+
+Advisory: this section does not switch the session model. See `.claude/skills/_shared/MODEL_SELECTION.md` for tier definitions.
+
+- **Default model:** Sonnet. Deciding what a day's activity amounted to, and framing it by impact rather than by action, is judgment work.
+- **Deterministic parts (no LLM):** date-boundary arithmetic, pagination loops, and the GitHub queries inside the shared `gh-activity.sh` script.
+- **Demote to Haiku when:** never. A wrong role split or a missed source carries into every report built on this output.
+- **Promote to Opus when:** never for routine runs.
+
 ## Steps
 
 **Setup — Resolve `<workspace>`**: The skill's base directory is `<workspace>/.claude/skills/collect-my-activity/`; walk up three directory levels and validate that `<workspace>/.claude/.workspace` exists. Use this `<workspace>` for all path references below (identity, output). Abort with a setup-broken error if validation fails — this is not recoverable from inside the skill.
 
 1. **Pre-flight checks**: Verify the environment before collecting:
    - **Slack MCP**: Check the Slack tools are available. They load under an MCP-server prefix (e.g. `mcp__<server>__slack_search_public_and_private`) and may be **deferred** — registered by name but schema-unloaded until fetched. Three states, not two: (a) the tools are available → proceed; (b) only an `authenticate`/`complete_authentication` tool is present → the server is a claude.ai connector awaiting interactive sign-in, so ask the user to run `/mcp`, select the Slack connector, and authenticate, then continue — this is recoverable, do **not** fail; (c) genuinely absent → fail (see below).
-   - **Atlassian MCP**: Check the Atlassian (Jira/Confluence) tools are available. They load under an MCP-server prefix (e.g. `mcp__<server>__getJiraIssue`) and may be **deferred** — registered by name but schema-unloaded until fetched. Three states, not two: (a) the tools are available → proceed; (b) only an `authenticate`/`complete_authentication` tool is present → the server is a claude.ai connector awaiting interactive sign-in, so ask the user to run `/mcp`, select the Atlassian connector, and authenticate, then continue — this is recoverable, do **not** fail; (c) genuinely absent → fail (see below).
+   - **Atlassian MCP**: Check the Atlassian (Jira/Confluence) tools are available. They load under an MCP-server prefix (e.g. `mcp__<server>__getJiraIssue`) and may be **deferred** — registered by name but schema-unloaded until fetched. Three states, not two: (a) the tools are available → proceed; (b) only an `authenticate`/`complete_authentication` tool is present → the server is a claude.ai connector awaiting interactive sign-in, so ask the user to run `/mcp`, select the Atlassian connector, and authenticate, then continue — this is recoverable, do **not** fail; (c) genuinely absent → fail (see below). On claude.ai the connector is Atlassian MCP (`claude_ai_Atlassian_MCP`, Atlassian's V2 endpoint); the older `claude_ai_Atlassian` and `claude_ai_Atlassian_Rovo` connectors run on Atlassian's V1 endpoint, which is being retired (removal 2027-03-01), and don't count as available. The Jira and Confluence steps below use that connector's tool names and parameters (`view`, `nextPageToken`, `cursor`); another Atlassian server needs them adapted.
    - **`gh` CLI**: Check if `gh` is available (`which gh`). Expected but not blocking. If missing, log a warning via `/log` (`status=WARNING detail=gh CLI not available — GitHub data will be missing. Install with: brew install gh && gh auth login`), mark as a gap, and continue.
 
    If Slack or Atlassian MCP is missing, **stop and write a failure status**:
@@ -41,7 +50,7 @@ Collect the user's work activity for a given day (or date range) from all availa
      2. `slack_read_user_profile.profile.email` (fallback if Atlassian is unavailable).
      3. `mcp__claude_ai_Google_Drive__list_recent_files` → `owners[0].emailAddress` (last automated fallback; only works if the user owns at least one file).
      4. Ask the user.
-   - **GitHub username** — `gh` supports multiple authenticated accounts. The skill targets the cached business handle without modifying the active session (see step 4 GitHub section for the script-file token-fetch pattern). Resolve as follows:
+   - **GitHub username** — `gh` supports multiple authenticated accounts. The skill targets the cached business handle without modifying the active session (see step 4 GitHub section for the shared script). Resolve as follows:
      - If cached in `## Profile`, use it. Verify it's still authenticated via `gh auth status` (parse for `Logged in to github.com account <handle>`). If the cached handle isn't in `gh auth status`, **fail loud** (FAILED) with re-auth instructions: `gh auth login --hostname github.com`.
      - If not cached, parse `gh auth status` for `Logged in to github.com account <handle>` lines:
        - **One account** → resolve via `gh api user --jq .login`, write back to `## Profile`.
@@ -89,8 +98,8 @@ Collect the user's work activity for a given day (or date range) from all availa
    | Source | Mechanism |
    |---|---|
    | Slack | `cursor` — loop until no next cursor |
-   | Jira | `startAt` + `maxResults` — loop until `isLast: true` or returned count `< maxResults` |
-   | Confluence | Same as Jira via the Atlassian MCP |
+   | Jira | `nextPageToken` — pass it back until `isLast: true` |
+   | Confluence | `cursor` — loop until no next cursor |
    | GitHub (`gh`) | `--limit 100` per query is effectively always enough for a single day; warn-if-hit rather than paginate further |
    | Drive | `pageToken` — loop until no next page |
 
@@ -113,32 +122,26 @@ Collect the user's work activity for a given day (or date range) from all availa
      2. **Created**: `creator = "<accountId>" AND created >= "YYYY-MM-DD" AND created < "next_day"` — captures new issues the user filed.
    - **Date boundary**: use `>= "YYYY-MM-DD" AND < "next_day"` (not `<=` — Jira treats `<= "04-10"` as "before start of 04-10").
    - **Timezone caveat**: JQL date literals evaluate in the Jira user's profile timezone, not UTC. Confirm the Jira profile TZ matches the user's local TZ or expect drift.
-   - Request minimal fields: `summary, status, issuetype, priority, updated, assignee, reporter`.
+   - Request minimal fields: `summary, status, issuetype, priority, updated, assignee, reporter`, with `view: "evidence"`. The default compact view silently drops `reporter` and every `accountId`, so each ticket would read as assignee-only and the reporter-only split below would never fire.
    - Capture: key, summary, status, **assignee**, **reporter**, what changed, issue URL.
    - **Reporter-only** (you filed it, not assigned): capture key, title, assignee, status only. Label as "Filed; assigned to {assignee-name}." Do not describe as your own delivery work.
    - **Assignee** (you own it): full detail — what moved, what's next, blockers if any.
    - **Both** (reporter and assignee): treat as assignee for detail.
 
    **GitHub:**
-   - **Use a script file Claude writes + executes; never `gh auth switch`.** Top-level Bash with `$(...)` substitution is blocked by the sandbox guard, but `$(...)` inside a script file that Claude then runs via `bash <script>` is not — the guard inspects top-level commands, not script contents. Fetch the cached handle's token in-process: `export GH_TOKEN="$(gh auth token --user <cached-handle>)"`. Token never enters tool output or transcripts; no global gh state mutation; no crash window.
+   - **Run the shared script; never `gh auth switch`, never write your own GitHub script.** Run `bash .claude/skills/_shared/scripts/gh-activity.sh <token-handle> <subject> <start> <end>` from the workspace root (the shell starts there; do not `cd`), with the cached business handle as `<token-handle>`, `@me` as `<subject>`, and the day's window as full ISO timestamps with the user's TZ offset. The script reads that handle's token inside its own process, so the token never reaches tool output and the active gh account is untouched. Sub-agents cannot answer permission prompts, and Claude Code refuses a top-level `$(...)` even under an allow rule; the allow list permits this one script by its path relative to the workspace root, so do not wrap, rename or copy it. A workspace whose `settings.json` predates the script lacks that rule, and sync does not update `settings.json`; add `Bash(bash .claude/skills/_shared/scripts/gh-activity.sh *)` by hand, or sub-agents get no GitHub data. Send the command bare: nothing before it (no `cd`, no env vars) and nothing after it (no `> file`, `2>&1`, `|`, `;`, `&&`, `$?`). Any addition stops the allow rule matching and the call is refused. Read the output and exit code from the tool result; save the output with the file tools if you need it. If the call is refused or fails, GitHub is not collected or only partly collected (see the exit codes below): say so in `## Gaps`, and never list GitHub items found some other way (a PR link in Slack) as GitHub collection.
    - **Pre-flight (read-only)**: `gh auth status` to confirm the cached handle is logged in. If not, fail with a `## Gaps` note suggesting `gh auth login --hostname github.com`. Never `gh auth switch`.
-   - **Date range syntax** — pass full ISO timestamps with the user's TZ offset, not bare `YYYY-MM-DD`. Bare dates are interpreted as UTC, so non-UTC user TZs slip by the offset (Asia/Dubai `--created "2026-04-30..2026-04-30"` covers local 04-30 04:00 → 05-01 04:00, missing/misattributing PRs at day boundaries).
-   - **Four queries** to run inside the script (after the `GH_TOKEN` export), with `LOCAL_START` and `LOCAL_END` set to the day's ISO timestamps:
-     - `gh search prs --author "@me" --created "${LOCAL_START}..${LOCAL_END}" --limit 100 --json number,title,url,repository,state,createdAt,updatedAt`
-     - `gh search prs --reviewed-by "@me" --updated "${LOCAL_START}..${LOCAL_END}" --limit 100 --json number,title,url,repository,state`
-     - `gh search issues --author "@me" --created "${LOCAL_START}..${LOCAL_END}" --limit 100 --json number,title,url,repository,state`
-     - `gh search issues --commenter "@me" --updated "${LOCAL_START}..${LOCAL_END}" --limit 100 --json number,title,url,repository`
-
-     `--limit 100` defends against `gh search`'s default `--limit 30` silently truncating — the JSON output has no `has_more` flag, so a truncated result is indistinguishable from a complete one.
+   - **Date range syntax** — pass full ISO timestamps with the user's TZ offset, not bare `YYYY-MM-DD` (the script rejects bare dates). Bare dates are interpreted as UTC, so non-UTC user TZs slip by the offset (Asia/Dubai `--created "2026-04-30..2026-04-30"` covers local 04-30 04:00 → 05-01 04:00, missing/misattributing PRs at day boundaries).
+   - **What it runs**: four `gh search` queries with `--limit 100` — PRs authored (`--created`), PRs reviewed (`--updated`), issues authored (`--created`), issues commented on (`--updated`). Output is four sections, each a `== <name>` line followed by a JSON array: `prs_authored`, `prs_reviewed`, `issues_authored`, `issues_commented`. Reviewed PRs and commented issues carry `updatedAt`, the last activity on the item, which is not necessarily the time of the person's own review or comment; use it to order items, not as their action time. A section holding 100 items hit the limit and may be truncated (`gh search` has no `has_more` flag); note it in `## Gaps`.
 
    - **Range syntax `A..B` is inclusive on both ends** — different from Jira's half-open convention above. Using `next_day T00:00:00` as the upper bound therefore includes events at exactly midnight local; this is a 1-second overlap with the next day's window, acceptable for daily granularity.
-   - With `GH_TOKEN` set to the cached handle's token, `@me` resolves to the business user regardless of the *active* gh handle.
+   - Because the script searches with the cached handle's token, `@me` resolves to the business user regardless of the *active* gh handle.
    - For each result: capture the repo, number, title, and URL.
-   - If `gh` is not available, note this gap and continue. If the token fetch errors (revoked grant, deleted handle), the script exits non-zero — surface the gh error in `## Gaps` with the same re-auth hint as pre-flight failure.
+   - If `gh` is not available, note this gap and continue. Script exit codes: `2` bad arguments: fix the call if you built it wrong; if the GitHub login itself is missing or malformed, record a GitHub gap; `3` no token for the handle (revoked grant, deleted handle): record a GitHub gap with the `gh auth login --hostname github.com` hint; `4` a search failed, after the script has already waited and retried once if GitHub rate-limited it (one wait per run): keep the sections printed before it, and record the failed section with gh's error quoted verbatim (often a rate limit or an unknown login, not an auth fault); `5` gh is not installed: record the gap and continue; `127` the script was not found because the shell is not at the workspace root: do not `cd` (the call would be refused); record GitHub as a gap: "the shell was not at the workspace root". Any other exit code is unexpected: record it as a GitHub gap with the code.
 
    **Confluence:**
    - Uses the same Atlassian MCP as Jira — no separate pre-flight check needed
-   - `searchConfluenceUsingCql`: `contributor = "{accountId}" AND lastmodified >= "YYYY-MM-DD" AND lastmodified < "next_day"` (same date boundary logic as Jira)
+   - `searchConfluence` (takes CQL): `contributor = "{accountId}" AND lastmodified >= "YYYY-MM-DD" AND lastmodified < "next_day"` (same date boundary logic as Jira)
    - The `contributor` field already covers comments — a comment is a Confluence contribution. No separate comment query needed.
    - For each result: capture the space, title, type of contribution (created vs. updated, page vs. comment), and the URL
 
