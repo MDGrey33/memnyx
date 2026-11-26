@@ -9,6 +9,15 @@ args: "Pick a scope based on user intent — orchestrator builds the (member × 
 
 Collect work activity for one or all team members for one or more days from Slack, Jira, Confluence, and GitHub. Designed for engineering leadership (EM, director, VP). Multi-pair scopes fan out to sub-agents — one sub-agent per (member, day) pair — for context isolation and parallelism.
 
+## Model Selection
+
+Advisory: this section does not switch the session model; it states policy for the executor sub-agents. See `.claude/skills/_shared/MODEL_SELECTION.md` for tier definitions.
+
+- **Default model:** Sonnet, for the orchestrator and the executors. Step 7 sets no model override, so executors inherit the session's model; Sonnet is enough for them. Classifying a member's tickets by role and execution evidence, and framing activity by impact, is judgment work.
+- **Deterministic parts (no LLM):** building the member × date pair list, date-boundary arithmetic, pagination loops, and the GitHub queries inside the token script.
+- **Demote to Haiku when:** never. Executor output feeds 1:1 prep and leadership reports, where a wrong `execution:` flag or role split becomes a claim about a person.
+- **Promote to Opus when:** never for routine runs.
+
 ## Privacy posture
 
 This skill reads from **private Slack channels** visible to the caller's Slack token (engineering, leadership, project channels) — not just public channels. Jira and Confluence access is bounded by the caller's Atlassian permissions; GitHub access uses the caller's gh identity (see "GitHub" section in the Executor Contract). Collected data lands on the caller's local disk under `<workspace>/collected/collect-team-activity/`. Intended for leadership oversight and 1:1 preparation with direct reports — do not run on members outside your direct report scope, and treat the output as confidential.
@@ -37,9 +46,9 @@ When scope resolves to exactly one (member, day) pair, the orchestrator runs the
 
 2. **Pre-flight checks**: Verify the environment before fanning out:
    - **Slack MCP**: Required. The tools load under an MCP-server prefix (e.g. `mcp__<server>__slack_search_public_and_private`) and may be **deferred** — registered by name but schema-unloaded until fetched. Three states, not two: (a) the tools are available → proceed; (b) only an `authenticate`/`complete_authentication` tool is present → the server is a claude.ai connector awaiting interactive sign-in, so ask the user to run `/mcp`, select the Slack connector, and authenticate, then continue — this is recoverable, do **not** abort; (c) genuinely absent → abort (see below).
-   - **Atlassian MCP**: Required (covers Jira + Confluence). The tools load under an MCP-server prefix (e.g. `mcp__<server>__getJiraIssue`) and may be **deferred** — registered by name but schema-unloaded until fetched. Three states, not two: (a) the tools are available → proceed; (b) only an `authenticate`/`complete_authentication` tool is present → the server is a claude.ai connector awaiting interactive sign-in, so ask the user to run `/mcp`, select the Atlassian connector, and authenticate, then continue — this is recoverable, do **not** abort; (c) genuinely absent → abort (see below).
+   - **Atlassian MCP**: Required (covers Jira + Confluence). The tools load under an MCP-server prefix (e.g. `mcp__<server>__getJiraIssue`) and may be **deferred** — registered by name but schema-unloaded until fetched. Three states, not two: (a) the tools are available → proceed; (b) only an `authenticate`/`complete_authentication` tool is present → the server is a claude.ai connector awaiting interactive sign-in, so ask the user to run `/mcp`, select the Atlassian connector, and authenticate, then continue — this is recoverable, do **not** abort; (c) genuinely absent → abort (see below). On claude.ai the connector is Atlassian MCP (`claude_ai_Atlassian_MCP`, Atlassian's V2 endpoint); the older `claude_ai_Atlassian` and `claude_ai_Atlassian_Rovo` connectors run on Atlassian's V1 endpoint, which is being retired (removal 2027-03-01), and don't count as available. The Jira and Confluence steps below use that connector's tool names and parameters (`view`, `nextPageToken`, `cursor`); another Atlassian server needs them adapted.
    - **`gh` CLI**: Expected. If missing, log a warning via `/log` (`status=WARNING detail=gh CLI not available — GitHub data will be missing. Install with: brew install gh && gh auth login`), mark as a gap, and continue. Sub-agents will record the same gap in their output files.
-   - **Sub-agent permissions**: sub-agents inherit project-level `.claude/settings.json` only — they cannot prompt for permissions. Verify the allowlist covers the MCP and CLI patterns sub-agents will call (Atlassian Rovo Jira/Confluence/Search, Slack search/read, `gh search` / `gh auth status` / `gh auth token`, plus `bash /tmp/...` for the script-file token pattern). Should already be in place from `/collect-my-activity` work.
+   - **Sub-agent permissions**: sub-agents inherit project-level `.claude/settings.json` only — they cannot prompt for permissions. Verify the allowlist covers the MCP and CLI patterns sub-agents will call (Atlassian MCP `searchJiraIssuesUsingJql`, `listJiraIssueComments` and `searchConfluence`, Slack search/read, `gh search` / `gh auth status` / `gh auth token`, plus `bash /tmp/...` for the script-file token pattern). Should already be in place from `/collect-my-activity` work.
 
    On required-tool failure, abort the run, surface a clear failure message to the user, and invoke `/log` with `status=FAILED` (see Logging section). No sentinel file — pre-flight failure means no pairs run, so there's no per-pair output to mark.
 
@@ -148,8 +157,8 @@ Do **not** use PARTIAL to signal "the day isn't over yet" or "I expected more da
 | Source | Mechanism |
 |---|---|
 | Slack | `cursor` — loop until no next cursor |
-| Jira | `startAt` + `maxResults` — loop until `isLast: true` or returned count `< maxResults` |
-| Confluence | Same as Jira via the Atlassian MCP |
+| Jira | `nextPageToken` — pass it back until `isLast: true` |
+| Confluence | `cursor` — loop until no next cursor |
 | GitHub (`gh`) | `--limit 100` per query is effectively always enough for a single day; warn-if-hit rather than paginate further |
 
 **Stop-and-flag rule**: at single-day, single-member granularity, if pagination hits 5+ pages on any single source — stop and flag in `## Gaps`. 500 events from one source on one day for one person is anomalous — almost always a wrong date boundary or a wrong identity filter.
@@ -187,24 +196,24 @@ Per-source query parameters:
 2. **Created**: `creator = "{jira_account_id}" AND created >= "YYYY-MM-DD" AND created < "next_day"`
 
 - **Date boundary**: `>= "YYYY-MM-DD" AND < "next_day"`.
-- Request minimal fields: `summary, status, issuetype, priority, updated, assignee, reporter`.
+- Request minimal fields: `summary, status, issuetype, priority, updated, assignee, reporter`, with `view: "evidence"`. The default compact view silently drops `reporter` and every `accountId`, so the role split below would read empty rather than fail.
 
 **Classify each returned ticket before capturing:**
 
-- **Reporter-only** (member is reporter, not assignee): light capture only — key, title, assignee name, current status. No description or context block. Label as "Filed by {member}; assigned to {assignee-name}." These are planning/oversight signals, not delivery signals. Group separately in the output under "Filed (reporter-only)".
+- **Reporter-only** (member is reporter, not assignee): light capture only — key, title, assignee name, current status. No description or context block. Label as "Filed by {member}; assigned to {assignee-name}." These are planning/oversight signals, not delivery signals. Group separately in the output under "Jira — Filed (reporter-only)".
 
 - **Assignee** (member is assignee, with or without also being reporter): full detail. Then check for execution evidence:
   1. Status is In Progress or Done → flag `execution: status-change`. Strong delivery signal.
-  2. Status unchanged but ticket was `updated` in the window → fetch this ticket via `getJiraIssue` and check whether the member's `{jira_account_id}` appears in any comment within the window. If yes → flag `execution: commented`. If no → flag `execution: none` (awareness/planning — ticket is in queue, not acted on).
-  - Cap extra `getJiraIssue` calls at 5 per executor. If more than 5 assignee tickets have status unchanged, prioritise the most recently updated ones.
+  2. Status unchanged but ticket was `updated` in the window → check whether the member's `{jira_account_id}` authored any comment created within the window. Read comments for all such tickets in one search, `key in (...)` with fields `comment` and `view: "evidence"` (compact drops comment authors' ids). If yes → flag `execution: commented`. If no → flag `execution: none` (awareness/planning — ticket is in queue, not acted on). The search returns only the newest comments; when a ticket reports more `remaining` and none of those shown fall before the window, read on with `listJiraIssueComments` (`view: "evidence"`, `orderBy: "-created"`, `startAt` = the number already shown; its compact view also drops authors' ids) until the comments predate the window, before concluding `none`. `getJiraIssue` is not a comment source: it reports a comment count, not the comments.
+  - At most 5 tickets per executor get a `listJiraIssueComments` follow-up, with as many pages each as the window needs (comment paging is exempt from the stop-and-flag rule). A follow-up that fails also gets `execution: unverified`. If more tickets need one, prioritise the most recently updated and flag the rest `execution: unverified` rather than `none`.
 
 - **Both** (member is assignee and reporter): treat as assignee for detail and execution evidence.
 
-Output: group tickets as "Owned (assignee)" and "Filed (reporter-only)" so downstream synthesis can apply role-appropriate interpretation.
+Output: group tickets as "Jira — Owned (assignee)" and "Jira — Filed (reporter-only)" so downstream synthesis can apply role-appropriate interpretation.
 
 **Confluence:**
 - Uses the same Atlassian MCP as Jira.
-- `searchConfluenceUsingCql`: `contributor = "{jira_account_id}" AND lastmodified >= "YYYY-MM-DD" AND lastmodified < "next_day"`.
+- `searchConfluence` (takes CQL): `contributor = "{jira_account_id}" AND lastmodified >= "YYYY-MM-DD" AND lastmodified < "next_day"`.
 - The `contributor` field already covers comments — a comment is a Confluence contribution. No separate comment query needed.
 - For each result: capture space, title, type of contribution (created vs. updated, page vs. comment), URL.
 
@@ -270,6 +279,12 @@ Four queries to run inside the script (after the `GH_TOKEN` export), with `{gith
 
 ### [category]
 - ...
+
+## Jira — Owned (assignee)
+- [JIRA-123](url) [title] — [status] · execution: <status-change|commented|none|unverified>
+
+## Jira — Filed (reporter-only)
+- [JIRA-456](url) [title] — assigned to [name], [status]
 
 ## Gaps
 [Only pair-specific runtime issues. Empty if no source was inaccessible.]
@@ -363,6 +378,6 @@ The skill expects `<workspace>/me/team.md` to follow this structure:
 
 Platform IDs can be resolved by:
 - **Slack**: `slack_search_users` by name, or check a user's profile in the Slack UI
-- **Jira**: `lookupJiraAccountId` by email, or check in Jira admin
+- **Jira**: `lookupJiraAccountId` by email, or check in Jira admin. This is a roster step for you or the main session, never an executor: on Atlassian MCP it has no direct tool, so it runs through `discover` and `executeRead`, which the shipped allowlist does not grant, so sub-agents cannot run it.
 - **GitHub**: the member's GitHub username
 - **Timezone**: optional IANA name (e.g., `Asia/Dubai`); skill falls back to the caller's TZ if absent

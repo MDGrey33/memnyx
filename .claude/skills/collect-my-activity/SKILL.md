@@ -9,13 +9,22 @@ args: "Optional date or date range (e.g., '2026-04-11', '2026-04-07 to 2026-04-1
 
 Collect the user's work activity for a given day (or date range) from all available data sources (Slack, Jira, Confluence, GitHub, Google Drive). Every item must include a source link. Output is written to `<workspace>/collected/`.
 
+## Model Selection
+
+Advisory: this section does not switch the session model. See `.claude/skills/_shared/MODEL_SELECTION.md` for tier definitions.
+
+- **Default model:** Sonnet. Deciding what a day's activity amounted to, and framing it by impact rather than by action, is judgment work.
+- **Deterministic parts (no LLM):** date-boundary arithmetic, pagination loops, and the GitHub queries inside the token script.
+- **Demote to Haiku when:** never. A wrong role split or a missed source carries into every report built on this output.
+- **Promote to Opus when:** never for routine runs.
+
 ## Steps
 
 **Setup — Resolve `<workspace>`**: The skill's base directory is `<workspace>/.claude/skills/collect-my-activity/`; walk up three directory levels and validate that `<workspace>/.claude/.workspace` exists. Use this `<workspace>` for all path references below (identity, output). Abort with a setup-broken error if validation fails — this is not recoverable from inside the skill.
 
 1. **Pre-flight checks**: Verify the environment before collecting:
    - **Slack MCP**: Check the Slack tools are available. They load under an MCP-server prefix (e.g. `mcp__<server>__slack_search_public_and_private`) and may be **deferred** — registered by name but schema-unloaded until fetched. Three states, not two: (a) the tools are available → proceed; (b) only an `authenticate`/`complete_authentication` tool is present → the server is a claude.ai connector awaiting interactive sign-in, so ask the user to run `/mcp`, select the Slack connector, and authenticate, then continue — this is recoverable, do **not** fail; (c) genuinely absent → fail (see below).
-   - **Atlassian MCP**: Check the Atlassian (Jira/Confluence) tools are available. They load under an MCP-server prefix (e.g. `mcp__<server>__getJiraIssue`) and may be **deferred** — registered by name but schema-unloaded until fetched. Three states, not two: (a) the tools are available → proceed; (b) only an `authenticate`/`complete_authentication` tool is present → the server is a claude.ai connector awaiting interactive sign-in, so ask the user to run `/mcp`, select the Atlassian connector, and authenticate, then continue — this is recoverable, do **not** fail; (c) genuinely absent → fail (see below).
+   - **Atlassian MCP**: Check the Atlassian (Jira/Confluence) tools are available. They load under an MCP-server prefix (e.g. `mcp__<server>__getJiraIssue`) and may be **deferred** — registered by name but schema-unloaded until fetched. Three states, not two: (a) the tools are available → proceed; (b) only an `authenticate`/`complete_authentication` tool is present → the server is a claude.ai connector awaiting interactive sign-in, so ask the user to run `/mcp`, select the Atlassian connector, and authenticate, then continue — this is recoverable, do **not** fail; (c) genuinely absent → fail (see below). On claude.ai the connector is Atlassian MCP (`claude_ai_Atlassian_MCP`, Atlassian's V2 endpoint); the older `claude_ai_Atlassian` and `claude_ai_Atlassian_Rovo` connectors run on Atlassian's V1 endpoint, which is being retired (removal 2027-03-01), and don't count as available. The Jira and Confluence steps below use that connector's tool names and parameters (`view`, `nextPageToken`, `cursor`); another Atlassian server needs them adapted.
    - **`gh` CLI**: Check if `gh` is available (`which gh`). Expected but not blocking. If missing, log a warning via `/log` (`status=WARNING detail=gh CLI not available — GitHub data will be missing. Install with: brew install gh && gh auth login`), mark as a gap, and continue.
 
    If Slack or Atlassian MCP is missing, **stop and write a failure status**:
@@ -89,8 +98,8 @@ Collect the user's work activity for a given day (or date range) from all availa
    | Source | Mechanism |
    |---|---|
    | Slack | `cursor` — loop until no next cursor |
-   | Jira | `startAt` + `maxResults` — loop until `isLast: true` or returned count `< maxResults` |
-   | Confluence | Same as Jira via the Atlassian MCP |
+   | Jira | `nextPageToken` — pass it back until `isLast: true` |
+   | Confluence | `cursor` — loop until no next cursor |
    | GitHub (`gh`) | `--limit 100` per query is effectively always enough for a single day; warn-if-hit rather than paginate further |
    | Drive | `pageToken` — loop until no next page |
 
@@ -113,7 +122,7 @@ Collect the user's work activity for a given day (or date range) from all availa
      2. **Created**: `creator = "<accountId>" AND created >= "YYYY-MM-DD" AND created < "next_day"` — captures new issues the user filed.
    - **Date boundary**: use `>= "YYYY-MM-DD" AND < "next_day"` (not `<=` — Jira treats `<= "04-10"` as "before start of 04-10").
    - **Timezone caveat**: JQL date literals evaluate in the Jira user's profile timezone, not UTC. Confirm the Jira profile TZ matches the user's local TZ or expect drift.
-   - Request minimal fields: `summary, status, issuetype, priority, updated, assignee, reporter`.
+   - Request minimal fields: `summary, status, issuetype, priority, updated, assignee, reporter`, with `view: "evidence"`. The default compact view silently drops `reporter` and every `accountId`, so each ticket would read as assignee-only and the reporter-only split below would never fire.
    - Capture: key, summary, status, **assignee**, **reporter**, what changed, issue URL.
    - **Reporter-only** (you filed it, not assigned): capture key, title, assignee, status only. Label as "Filed; assigned to {assignee-name}." Do not describe as your own delivery work.
    - **Assignee** (you own it): full detail — what moved, what's next, blockers if any.
@@ -138,7 +147,7 @@ Collect the user's work activity for a given day (or date range) from all availa
 
    **Confluence:**
    - Uses the same Atlassian MCP as Jira — no separate pre-flight check needed
-   - `searchConfluenceUsingCql`: `contributor = "{accountId}" AND lastmodified >= "YYYY-MM-DD" AND lastmodified < "next_day"` (same date boundary logic as Jira)
+   - `searchConfluence` (takes CQL): `contributor = "{accountId}" AND lastmodified >= "YYYY-MM-DD" AND lastmodified < "next_day"` (same date boundary logic as Jira)
    - The `contributor` field already covers comments — a comment is a Confluence contribution. No separate comment query needed.
    - For each result: capture the space, title, type of contribution (created vs. updated, page vs. comment), and the URL
 
