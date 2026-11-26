@@ -3,10 +3,9 @@
     "allow": [
       "WebSearch",
       "WebFetch",
-      "Bash(GH_TOKEN=$(gh auth token *) gh search *:*)",
+      "Bash(bash .claude/skills/_shared/scripts/gh-activity.sh *)",
       "Bash(gh search prs:*)",
       "Bash(gh search issues:*)",
-      "Bash(gh auth token --user *:*)",
       "Bash(gh auth status:*)",
       "Bash(gh auth list:*)",
       "Bash(gh auth switch --user *:*)",
