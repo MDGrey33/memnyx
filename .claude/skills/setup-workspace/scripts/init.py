@@ -267,7 +267,7 @@ def wire_hooks(created: list, skipped: list) -> None:
     """Add the compaction-safeguard hook entries (and the status line, if none)
     to the workspace settings.json. Touches only Memnyx-owned entries."""
     for action in _hooks.wire_settings(workspace(), apply=not is_dry_run()):
-        if action.startswith(("added ", "re-pointed ")):
+        if action.startswith(("added ", "removed ")):
             created.append(f"settings.json: {action}")
         else:
             skipped.append(f"settings.json: {action}")
@@ -459,7 +459,7 @@ def main() -> None:
     write_source_ref(source, created, skipped)
     deploy_dir(source / ".claude/skills", _WORKSPACE / ".claude/skills", overwrite=True, created=created, skipped=skipped, label="skills")
     deploy_dir(source / ".claude/agents", _WORKSPACE / ".claude/agents", overwrite=True, created=created, skipped=skipped, label="agents")
-    deploy_dir(source / ".claude/hooks", _WORKSPACE / ".claude/hooks", overwrite=True, created=created, skipped=skipped, label="hooks")
+    deploy_dir(source / ".claude/hooks/memnyx", _WORKSPACE / ".claude/hooks/memnyx", overwrite=True, created=created, skipped=skipped, label="hooks/memnyx")
     deploy_agent_guardrails(source, created, skipped)
     deploy_other_docs(source, created, skipped)
     deploy_settings(source, created, skipped)

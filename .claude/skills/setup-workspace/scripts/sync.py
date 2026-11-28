@@ -9,7 +9,7 @@ Usage:
 Walks two surfaces:
 
   1. Upstream-owned content (`.claude/skills/**`, `.claude/agents/**`,
-     `.claude/hooks/**`, `.claude/docs/agent-guardrails.md`) — fully bucketed
+     `.claude/hooks/memnyx/**`, `.claude/docs/agent-guardrails.md`) — fully bucketed
      and acted on.
   2. Starter files (workspace-level + per-registered-project) — bucketed
      with the `update` bucket SUPPRESSED. Starters are user-evolved after
@@ -35,9 +35,10 @@ Does NOT touch user-evolved content directly: CLAUDE.md, MEMORY.md, lessons-lear
 identity, workstreams, sessions, settings.json, project-context.md, or other
 .claude/docs/* templates. The starter walk does *report* divergence for files in
 these categories, but never overwrites. One narrow exception: on --apply-all,
-settings.json gets the Memnyx-owned compaction-safeguard hook entries added or
-re-pointed (recognised by script path) and a statusLine only if it has none;
-nothing else in it is changed or removed (see _hooks.py).
+settings.json gets the Memnyx-owned compaction-safeguard hook entries added
+(recognised by their exact command; duplicates of them removed) and a
+statusLine only if no settings scope has one; nothing else in it is changed or
+removed (see _hooks.py).
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ import _hooks  # wires the compaction-safeguard hooks into settings.json
 SOURCE_REF_REL = ".claude/.source"
 REGISTRY_REL = ".claude/projects-index.json"
 
-SYNCED_DIRS = [".claude/skills", ".claude/agents", ".claude/hooks"]
+SYNCED_DIRS = [".claude/skills", ".claude/agents", ".claude/hooks/memnyx"]
 SYNCED_FILES = [".claude/docs/agent-guardrails.md"]
 
 STARTERS_WORKSPACE_DIR_REL = ".claude/skills/setup-workspace/templates/starters/workspace"
