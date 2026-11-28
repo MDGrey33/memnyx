@@ -61,6 +61,7 @@ from _common import (  # noqa: E402
     layer_symlink_refusal, base_is_layered,
 )
 import launcher  # noqa: E402  — launcher.write_memnyx_sh writes the mmn shell launcher
+import _hooks  # noqa: E402  — wires the compaction-safeguard hooks into settings.json
 
 # Module-level state set by main()
 _WORKSPACE: Path | None = None
@@ -262,6 +263,16 @@ def deploy_settings(source: Path, created: list, skipped: list) -> None:
     created.append(".claude/settings.json")
 
 
+def wire_hooks(created: list, skipped: list) -> None:
+    """Add the compaction-safeguard hook entries (and the status line, if none)
+    to the workspace settings.json. Touches only Memnyx-owned entries."""
+    for action in _hooks.wire_settings(workspace(), apply=not is_dry_run()):
+        if action.startswith(("added ", "re-pointed ")):
+            created.append(f"settings.json: {action}")
+        else:
+            skipped.append(f"settings.json: {action}")
+
+
 def claude_base_allows_overlays(skipped: list) -> bool:
     """Whether overlay seeding is safe — true only when the base CLAUDE.md is (or
     will be) layered, recording the skip reason for each held case. A symlinked base
@@ -448,9 +459,11 @@ def main() -> None:
     write_source_ref(source, created, skipped)
     deploy_dir(source / ".claude/skills", _WORKSPACE / ".claude/skills", overwrite=True, created=created, skipped=skipped, label="skills")
     deploy_dir(source / ".claude/agents", _WORKSPACE / ".claude/agents", overwrite=True, created=created, skipped=skipped, label="agents")
+    deploy_dir(source / ".claude/hooks", _WORKSPACE / ".claude/hooks", overwrite=True, created=created, skipped=skipped, label="hooks")
     deploy_agent_guardrails(source, created, skipped)
     deploy_other_docs(source, created, skipped)
     deploy_settings(source, created, skipped)
+    wire_hooks(created, skipped)
     # Capture before generate_claude_md creates the base: overlays seed only when
     # the base is (or will be) layered. claude_base_allows_overlays records the skip
     # reason for the held cases (legacy monolith, unreadable); a symlinked base is

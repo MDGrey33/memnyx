@@ -28,8 +28,9 @@ This workspace uses a layered memory system. Optionally, it integrates with a se
 ├── CLAUDE.local.md                 # workspace-local overlay (native; never synced)
 ├── .claude/
 │   ├── skills/  agents/  docs/     # deployed by /setup-workspace
+│   ├── hooks/                      # compaction-safeguard scripts (synced like skills)
 │   ├── memory/                     # workspace MEMORY/lessons
-│   ├── settings.json
+│   ├── settings.json               # yours; init/sync add only the safeguard hooks
 │   └── projects-index.json         # project registry
 ├── workstreams/                    # open-item ledgers per workstream (gitignored)
 ├── sessions/active/                # advisory markers (gitignored)
