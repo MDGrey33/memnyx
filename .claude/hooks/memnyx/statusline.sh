@@ -1,6 +1,8 @@
 #!/bin/bash
 # Status line: the model and how full the context window is. Installed by
-# /setup-workspace only when no status line is set in any settings scope.
+# /setup-workspace only when no status line is set in any settings scope. Outside
+# the workspace root, where its settings.json does not load, the `mmn` launcher
+# passes it with --settings under the same rule (see templates/memnyx.sh.tmpl).
 # Yellow from 60%, red from 75%: the cue to checkpoint the ledger or run /compact.
 in=$(cat)
 command -v jq >/dev/null 2>&1 || { printf 'context – (jq not installed)'; exit 0; }
