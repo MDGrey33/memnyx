@@ -11,6 +11,15 @@
 # never guesses. The folder is reported as its physical path (symlinks resolved),
 # the same form `mmn <slug>` uses for the project folder.
 #
+# Every `$(cd … && pwd -P)` in this file is written `\cd … >/dev/null 2>&1`. The
+# backslash skips a `cd` alias (Omarchy aliases `cd` to zoxide's `zd`, which
+# prints an icon line and the path when given `--`), and the redirect drops
+# anything a `cd` function prints. Without both, the noise lands in the captured
+# path and the check after it fails silently: no hooks, or no project. The
+# `cd` into the project before launching is `\cd` too, so an alias cannot send
+# Claude to another folder (zoxide does not record that jump). A `cd`
+# function still runs, so one that fails but returns 0 is not caught.
+#
 # This runs only once the file is being sourced. The line in your shell profile
 # that sources it holds an absolute path, so after moving a workspace re-run
 # `launcher.py --wire-profile`; until then the shell skips the file and `mmn` is
@@ -32,8 +41,8 @@ fi
 _mmn_found=
 if [ -n "$_mmn_self" ]; then
   case "$_mmn_self" in
-    */*) _mmn_found=$(CDPATH= cd -- "${_mmn_self%/*}/.." 2>/dev/null && pwd -P) ;;
-    *)   _mmn_found=$(CDPATH= cd -- .. 2>/dev/null && pwd -P) ;;
+    */*) _mmn_found=$(CDPATH= \cd -- "${_mmn_self%/*}/.." >/dev/null 2>&1 && pwd -P) ;;
+    *)   _mmn_found=$(CDPATH= \cd -- .. >/dev/null 2>&1 && pwd -P) ;;
   esac
 fi
 if [ -n "$_mmn_found" ] && [ -f "$_mmn_found/.claude/.workspace" ]; then
@@ -84,7 +93,7 @@ mmn() {
         echo "mmn: the workspace folder $_mmn_ws does not exist, so project '$1' cannot be found — run /setup-workspace sync to regenerate this file" >&2
         return 1
       fi
-      _mmn_dir=$(cd "$_mmn_ws/projects/$1" 2>/dev/null && pwd -P)
+      _mmn_dir=$(\cd "$_mmn_ws/projects/$1" >/dev/null 2>&1 && pwd -P)
       if [ -n "$_mmn_dir" ] && [ -d "$_mmn_dir" ]; then
         shift
         _mmn_run "$_mmn_dir" "$@"
@@ -118,11 +127,57 @@ _mmn_run() {
   else
     _mmn_where="$(pwd -P)  (current folder)"
   fi
+  # The compaction-safeguard hooks are wired in the workspace's settings.json,
+  # which Claude Code loads only when it starts at the workspace root itself.
+  # Anywhere else (a project's clone, a subfolder) mmn passes the same three
+  # hooks with --settings; hooks given that way are added to the folder's own.
+  # The commands name $MEMNYX_WORKSPACE rather than a path. At the root nothing
+  # is added, so the hooks never fire twice.
+  #
+  # The context gauge (statusline.sh) comes along the same way, but only when no
+  # status line is set in your user settings or the folder's own: a status line
+  # is one setting, not a list, and one given with --settings would replace yours.
+  # The check is a plain text match for "statusLine", on purpose: it can only err
+  # towards no gauge, never towards replacing a status line it failed to parse.
+  if [ -n "$_mmn_tgt" ]; then _mmn_dest="$_mmn_tgt"; else _mmn_dest=$(pwd -P); fi
+  _mmn_wsp=$(CDPATH= \cd -- "$_mmn_ws" >/dev/null 2>&1 && pwd -P)
+  _mmn_hooks= _mmn_gauge= _mmn_kept=
+  if [ -n "$_mmn_wsp" ] && [ "$_mmn_dest" != "$_mmn_wsp" ] \
+      && [ -f "$_mmn_wsp/.claude/hooks/memnyx/compaction.sh" ]; then
+    _mmn_hooks='{"hooks":{"PreCompact":[{"matcher":"*","hooks":[{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/compaction.sh pre","timeout":10}]}],"PostCompact":[{"matcher":"*","hooks":[{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/compaction.sh post","timeout":10}]}],"SessionStart":[{"matcher":"compact","hooks":[{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/compaction.sh resume","timeout":10}]}]}}'
+    _mmn_gauge=yes
+    for _mmn_f in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
+        "$_mmn_dest/.claude/settings.json" "$_mmn_dest/.claude/settings.local.json"; do
+      if [ -z "$_mmn_kept" ] && \grep -qs '"statusLine"' "$_mmn_f"; then
+        _mmn_gauge= _mmn_kept="$_mmn_f"
+      fi
+    done
+    [ -f "$_mmn_wsp/.claude/hooks/memnyx/statusline.sh" ] || _mmn_gauge= _mmn_kept=
+    if [ -n "$_mmn_gauge" ]; then
+      _mmn_hooks="${_mmn_hooks%?}"',"statusLine":{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/statusline.sh"}}'
+    fi
+  fi
   printf '\n%s  mmn ▸ launching Claude%s\n' "$_mmn_hd" "$_mmn_rs"
   printf '%s  ├─ cd  %s %s\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_where"
-  printf '%s  └─ run %s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir %s %s\n\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_ws" "$*"
-  if [ -n "$_mmn_tgt" ]; then
-    cd "$_mmn_tgt" || return 1
+  if [ -n "$_mmn_hooks" ]; then
+    printf '%s  ├─ hooks %s compaction safeguard added with --settings (not at the workspace root, so its settings.json does not load)\n' "$_mmn_dm" "$_mmn_rs"
+    if [ -n "$_mmn_gauge" ]; then
+      printf '%s  ├─ gauge %s context gauge added too (no status line set in your settings or this folder'"'"'s)\n' "$_mmn_dm" "$_mmn_rs"
+      _mmn_what='compaction hooks + gauge'
+    else
+      [ -n "$_mmn_kept" ] && printf '%s  ├─ gauge %s not added: kept the status line set in %s\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_kept"
+      _mmn_what='compaction hooks'
+    fi
+    printf '%s  └─ run %s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir %s --settings <%s> %s\n\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_ws" "$_mmn_what" "$*"
+  else
+    printf '%s  └─ run %s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir %s %s\n\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_ws" "$*"
   fi
-  CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir "$_mmn_ws" "$@"
+  if [ -n "$_mmn_tgt" ]; then
+    \cd "$_mmn_tgt" || return 1
+  fi
+  if [ -n "$_mmn_hooks" ]; then
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir "$_mmn_ws" --settings "$_mmn_hooks" "$@"
+  else
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir "$_mmn_ws" "$@"
+  fi
 }
