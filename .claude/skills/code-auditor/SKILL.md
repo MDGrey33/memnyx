@@ -204,6 +204,12 @@ wrong against the code around it, and that is the defect class a diff-scoped rea
   change and make it fail. Any that has no such line is reported. This is the question an author
   does not think to ask — the guard was written deliberately, so it feels examined — and it matters
   most when the session that wrote the change is the one running the audit.
+  **When the added check detects a change** (has the size, the file or the state moved since last
+  time), also name what it compares against, and confirm that is the state of the output — what is
+  on screen, on disk or sent — not an earlier reading of the input. A baseline taken at the previous
+  check, or when an event arrived, lets the output drift from it while both readings agree. kybos
+  F150 took three audit rounds, each finding a narrower form of the same stale baseline, before the
+  window size was compared with the size last drawn.
 - **Expansion is driven by a specific question**, never by general thoroughness. "Does any caller
   pass null here" justifies opening callers. "Let me understand this module" does not.
 - **Stop when the question is answered**, not when you run out of budget.
