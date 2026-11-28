@@ -62,6 +62,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 | `/claude-slash-commands` | Manual | Version-pinned reference for every built-in Claude Code slash (`/`) command — what each does, aliases, Skills/Workflows vs fixed built-ins — plus how to author custom `/commands` and the `/loop` vs `/schedule` breakdown. |
 | `/claude-cli-flags` | Manual | Version-pinned reference for every Claude Code CLI flag, classified by interactive vs headless (`-p`) vs both, with canonical launch recipes per mode. |
 | `/scribe` | Manual | Generate or maintain a project's Claude-facing docs (`CLAUDE.md`, `.claude/docs/*`, project-context, README) from verified facts. `--deep` adds per-subsystem `scribe-explorer` exploration plus an independent `scribe-verifier` pass; unconfirmed claims go to a hazards artifact. Packaged as a skills-directory plugin (`scribe@skills-dir`), bundling its two agents. |
+| `/code-auditor` | Manual | Independent, adversarial code audit. `--review` judges a change and never scores; `--inspect` scores a repo into a ranked remediation plan. Owns security, test adequacy, corpus-wide duplication and expansion beyond the change; delegates the diff-scoped pass rather than reimplementing it. Read-only — reports, never fixes. Packaged as a skills-directory plugin (`code-auditor@skills-dir`), bundling its three read-only agents. |
 | `/setup-auto-memory` | Manual | Wire in the optional auto-memory system (typed atomic files in `~/.claude/projects/<slug>/memory/`). See `auto-memory/README.md`. |
 | `/setup-playwright-mcp` | Manual | Install and configure Playwright MCP for browser automation |
 | `/setup-aws-mcp` | Manual | Install and configure the managed AWS MCP Server (via the `mcp-proxy-for-aws` stdio proxy) for read-only AWS access. Supersedes the deprecated `awslabs.aws-api-mcp-server`. |
@@ -90,6 +91,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 /contribute ──> /sanitizer (blocks staging on any finding)
 /pull-contributions ──> /sanitizer --check (blocks pull on any finding)
 /scribe ──> /sanitizer (blocks on findings in generated docs)
+/code-auditor ──> built-in diff reviewer ──> /sanitizer (before a report leaves)
 /sanitizer (manual, on any file/dir/glob)
 ```
 

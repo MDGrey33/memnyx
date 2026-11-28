@@ -5,6 +5,12 @@ name: skill-table parity
 #                             the skill tables in README.md, CLAUDE.md, and
 #                             the generated-workspace template. See
 #                             scripts/check_skill_tables.py for the rationale.
+#                             Also runs scripts/validate_code_auditor.py, which
+#                             checks that skill's internal contracts still close
+#                             (its agents' vocabularies against the files that
+#                             consume them). Its own self-test runs in the job
+#                             below, so a gate that stops being able to fail is
+#                             caught rather than trusted.
 #   setup-workspace-tests   — regression tests for the setup-workspace scripts
 #                             (add_project.py CLAUDE.md generate/patch behavior,
 #                             fork-overlay source resolution) and the parity
@@ -36,6 +42,8 @@ jobs:
           python-version: "3.12"
       - name: Check skill-table parity
         run: python3 scripts/check_skill_tables.py
+      - name: Check code-auditor package structure
+        run: python3 scripts/validate_code_auditor.py
 
   setup-workspace-tests:
     runs-on: ubuntu-latest
