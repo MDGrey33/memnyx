@@ -491,6 +491,7 @@ def test_mmn_adds_the_gauge_when_no_status_line_is_set(shell, tmp_path, recordin
                          env={**os.environ, "MEMNYX_WORKSPACE": rec["ws"]}, cwd=rec["cwd"])
     assert out.stdout.strip() == f"GAUGE from {ws}", out.stderr
     assert "context gauge added too" in r.stdout
+    assert "--settings <compaction hooks + gauge>" in r.stdout
 
 
 def _status_line_in(where: str, ws: Path, user_config: Path) -> None:
@@ -514,11 +515,28 @@ def test_mmn_keeps_a_status_line_set_elsewhere(shell, where, tmp_path, recording
     s = settings_arg(rec["args"])
     assert s is not None and set(s) == {"hooks"}           # hooks still added
     assert "context gauge added" not in r.stdout
+    assert "not added: kept the status line set in" in r.stdout
+    assert "--settings <compaction hooks> " in r.stdout
 
 
 @pytest.mark.parametrize("shell", ALL_SHELLS)
 def test_mmn_adds_no_gauge_when_its_script_is_absent(shell, tmp_path, recording_claude):
     ws = make_workspace(tmp_path)
     with_hook_script(ws)                                   # no statusline.sh
+    _, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path)
+    assert set(settings_arg(rec["args"])) == {"hooks"}
+
+
+@pytest.mark.parametrize("shell", ALL_SHELLS)
+def test_without_claude_config_dir_the_user_settings_are_in_home(shell, tmp_path, recording_claude,
+                                                                 monkeypatch):
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude/settings.json").write_text('{"statusLine": {"type": "command", "command": "mine.sh"}}')
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    monkeypatch.setenv("HOME", str(home))
+    ws = make_workspace(tmp_path)
+    with_hook_script(ws)
+    with_statusline_script(ws)
     _, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path)
     assert set(settings_arg(rec["args"])) == {"hooks"}
