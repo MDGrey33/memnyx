@@ -268,3 +268,121 @@ def test_mmn_warns_but_still_launches_in_the_current_folder_when_the_workspace_i
     assert r.returncode == 0, r.stderr
     assert "FAKE-CLAUDE" in r.stdout
     assert "workspace folder" in r.stderr and str(ws) in r.stderr
+
+
+# --- compaction-safeguard hooks outside the workspace root -----------------------
+#
+# Claude Code loads the workspace's settings.json (where the hooks are wired) only
+# when it starts at the workspace root. Elsewhere mmn must pass the hooks itself
+# with --settings, and at the root it must not, or they fire twice.
+
+import json  # noqa: E402
+
+HOOKS_REL = Path(".claude/hooks/memnyx/compaction.sh")
+
+
+@pytest.fixture
+def recording_claude(tmp_path: Path) -> Path:
+    """A fake claude that records cwd, MEMNYX_WORKSPACE and each argument."""
+    bin_dir = tmp_path / "recbin"
+    bin_dir.mkdir()
+    exe = bin_dir / "claude"
+    exe.write_text(
+        '#!/bin/sh\n'
+        'out="$MMN_TEST_RECORD"\n'
+        '{ printf "cwd=%s\\n" "$(pwd -P)"; printf "ws=%s\\n" "$MEMNYX_WORKSPACE";\n'
+        '  for a in "$@"; do printf "arg=%s\\n" "$a"; done; } > "$out"\n'
+    )
+    exe.chmod(0o755)
+    return bin_dir
+
+
+def with_hook_script(ws: Path) -> None:
+    script = ws / HOOKS_REL
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text('echo "HOOK ran in $(cd "$(dirname "$0")/../../.." && pwd -P) mode=$1"\n')
+
+
+def launch(shell: str, ws: Path, command: str, bin_dir: Path, tmp_path: Path,
+           cwd: Path | None = None) -> tuple[subprocess.CompletedProcess, dict]:
+    record = tmp_path / "record.txt"
+    env_script = f'MMN_TEST_RECORD="{record}"; export MMN_TEST_RECORD; . "$1"; {command}'
+    r = run_sh(shell, env_script, str(ws / "shell" / "memnyx.sh"), cwd=cwd, path_prefix=bin_dir)
+    assert r.returncode == 0, r.stderr
+    lines = record.read_text().splitlines()
+    rec = {"cwd": lines[0][4:], "ws": lines[1][3:], "args": [l[4:] for l in lines[2:]]}
+    return r, rec
+
+
+def settings_arg(args: list[str]) -> dict | None:
+    if "--settings" not in args:
+        return None
+    return json.loads(args[args.index("--settings") + 1])
+
+
+@pytest.mark.parametrize("shell", ALL_SHELLS)
+def test_mmn_passes_the_hooks_when_opening_a_project(shell, tmp_path, recording_claude):
+    ws = make_workspace(tmp_path)
+    with_hook_script(ws)
+    r, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path)
+    s = settings_arg(rec["args"])
+    assert s is not None and set(s) == {"hooks"}          # no statusLine
+    assert {e: [g["matcher"] for g in s["hooks"][e]] for e in s["hooks"]} == {
+        "PreCompact": ["*"], "PostCompact": ["*"], "SessionStart": ["compact"]}
+    assert rec["ws"] == str(ws)
+    assert str(ws) not in json.dumps(s)                    # no machine path in the JSON
+    assert "compaction safeguard added with --settings" in r.stdout
+    assert "--settings <compaction hooks>" in r.stdout
+    # The commands, run as Claude Code would (env inherited), reach the workspace's script.
+    for event, mode in (("PreCompact", "pre"), ("PostCompact", "post"), ("SessionStart", "resume")):
+        cmd = s["hooks"][event][0]["hooks"][0]["command"]
+        out = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True,
+                             env={**os.environ, "MEMNYX_WORKSPACE": rec["ws"]}, cwd=rec["cwd"])
+        assert out.stdout.strip() == f"HOOK ran in {ws} mode={mode}", out.stderr
+
+
+@pytest.mark.parametrize("shell", ALL_SHELLS)
+def test_mmn_adds_nothing_at_the_workspace_root(shell, tmp_path, recording_claude):
+    ws = make_workspace(tmp_path)
+    with_hook_script(ws)
+    r, rec = launch(shell, ws, "mmn", recording_claude, tmp_path, cwd=ws)
+    assert rec["cwd"] == str(ws)
+    assert "--settings" not in rec["args"]
+    assert "compaction safeguard added" not in r.stdout
+
+
+@pytest.mark.parametrize("shell", ALL_SHELLS)
+def test_mmn_passes_the_hooks_in_a_subfolder_of_the_workspace(shell, tmp_path, recording_claude):
+    ws = make_workspace(tmp_path)
+    with_hook_script(ws)
+    sub = ws / "notes"
+    sub.mkdir()
+    _, rec = launch(shell, ws, "mmn", recording_claude, tmp_path, cwd=sub)
+    assert settings_arg(rec["args"]) is not None
+
+
+@pytest.mark.parametrize("shell", ALL_SHELLS)
+def test_mmn_adds_nothing_when_the_hook_scripts_are_absent(shell, tmp_path, recording_claude):
+    ws = make_workspace(tmp_path)                          # no .claude/hooks/memnyx/
+    _, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path)
+    assert "--settings" not in rec["args"]
+
+
+@pytest.mark.parametrize("shell", SELF_LOCATING)
+def test_mmn_hooks_work_from_a_workspace_path_with_spaces_and_quotes(shell, tmp_path, recording_claude):
+    ws = make_workspace(tmp_path, name="my 'odd' ws")
+    with_hook_script(ws)
+    _, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path)
+    cmd = settings_arg(rec["args"])["hooks"]["PreCompact"][0]["hooks"][0]["command"]
+    out = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True,
+                         env={**os.environ, "MEMNYX_WORKSPACE": rec["ws"]}, cwd=rec["cwd"])
+    assert out.stdout.strip() == f"HOOK ran in {ws} mode=pre", out.stderr
+
+
+@pytest.mark.parametrize("shell", ALL_SHELLS)
+def test_user_flags_still_pass_through_with_the_hooks(shell, tmp_path, recording_claude):
+    ws = make_workspace(tmp_path)
+    with_hook_script(ws)
+    _, rec = launch(shell, ws, "mmn demo --model haiku", recording_claude, tmp_path)
+    assert rec["args"][-2:] == ["--model", "haiku"]
+    assert rec["args"][:2] == ["--add-dir", str(ws)]

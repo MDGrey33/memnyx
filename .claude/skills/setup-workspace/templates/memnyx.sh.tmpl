@@ -118,11 +118,34 @@ _mmn_run() {
   else
     _mmn_where="$(pwd -P)  (current folder)"
   fi
+  # The compaction-safeguard hooks are wired in the workspace's settings.json,
+  # which Claude Code loads only when it starts at the workspace root itself.
+  # Anywhere else (a project's clone, a subfolder) mmn passes the same three
+  # hooks with --settings; hooks given that way are added to the folder's own.
+  # The commands name $MEMNYX_WORKSPACE rather than a path, and the status line
+  # is left to the folder's own settings. At the root nothing is added, so the
+  # hooks never fire twice.
+  if [ -n "$_mmn_tgt" ]; then _mmn_dest="$_mmn_tgt"; else _mmn_dest=$(pwd -P); fi
+  _mmn_wsp=$(CDPATH= cd -- "$_mmn_ws" 2>/dev/null && pwd -P)
+  _mmn_hooks=
+  if [ -n "$_mmn_wsp" ] && [ "$_mmn_dest" != "$_mmn_wsp" ] \
+      && [ -f "$_mmn_wsp/.claude/hooks/memnyx/compaction.sh" ]; then
+    _mmn_hooks='{"hooks":{"PreCompact":[{"matcher":"*","hooks":[{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/compaction.sh pre","timeout":10}]}],"PostCompact":[{"matcher":"*","hooks":[{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/compaction.sh post","timeout":10}]}],"SessionStart":[{"matcher":"compact","hooks":[{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/compaction.sh resume","timeout":10}]}]}}'
+  fi
   printf '\n%s  mmn ▸ launching Claude%s\n' "$_mmn_hd" "$_mmn_rs"
   printf '%s  ├─ cd  %s %s\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_where"
-  printf '%s  └─ run %s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir %s %s\n\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_ws" "$*"
+  if [ -n "$_mmn_hooks" ]; then
+    printf '%s  ├─ hooks %s compaction safeguard added with --settings (not at the workspace root, so its settings.json does not load)\n' "$_mmn_dm" "$_mmn_rs"
+    printf '%s  └─ run %s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir %s --settings <compaction hooks> %s\n\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_ws" "$*"
+  else
+    printf '%s  └─ run %s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir %s %s\n\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_ws" "$*"
+  fi
   if [ -n "$_mmn_tgt" ]; then
     cd "$_mmn_tgt" || return 1
   fi
-  CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir "$_mmn_ws" "$@"
+  if [ -n "$_mmn_hooks" ]; then
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir "$_mmn_ws" --settings "$_mmn_hooks" "$@"
+  else
+    CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir "$_mmn_ws" "$@"
+  fi
 }
