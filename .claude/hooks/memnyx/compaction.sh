@@ -61,11 +61,15 @@ markers() {
         if [ "$sid" != "?" ] && [ -n "$c" ] && [ "$c" = "$sid" ]; then mine="$mine$line
 "; fi
     done
+    # The id is shown so it can be checked against the marker; only in the shape
+    # Claude Code gives it, since what is printed here reaches the model.
+    shown=""
+    [[ $sid =~ ^[A-Za-z0-9-]{1,64}$ ]] && shown=" $sid"
     if [ -n "$mine" ]; then
-        echo "This session's marker (matched on Claude Code's session id):"
+        echo "This session's marker (matched on Claude Code's session id$shown):"
         printf '%s' "$mine"
     elif [ -n "$all" ]; then
-        echo "Active session markers (none carries this session's id, so all are listed):"
+        echo "Active session markers (none carries this session's id$shown, so all are listed):"
         printf '%s' "$all"
     else
         echo "Active session markers: none found"
