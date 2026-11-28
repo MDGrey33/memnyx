@@ -131,20 +131,35 @@ _mmn_run() {
   # which Claude Code loads only when it starts at the workspace root itself.
   # Anywhere else (a project's clone, a subfolder) mmn passes the same three
   # hooks with --settings; hooks given that way are added to the folder's own.
-  # The commands name $MEMNYX_WORKSPACE rather than a path, and the status line
-  # is left to the folder's own settings. At the root nothing is added, so the
-  # hooks never fire twice.
+  # The commands name $MEMNYX_WORKSPACE rather than a path. At the root nothing
+  # is added, so the hooks never fire twice.
+  #
+  # The context gauge (statusline.sh) comes along the same way, but only when no
+  # status line is set in your user settings or the folder's own: a status line
+  # is one setting, not a list, and one given with --settings would replace yours.
   if [ -n "$_mmn_tgt" ]; then _mmn_dest="$_mmn_tgt"; else _mmn_dest=$(pwd -P); fi
   _mmn_wsp=$(CDPATH= \cd -- "$_mmn_ws" >/dev/null 2>&1 && pwd -P)
-  _mmn_hooks=
+  _mmn_hooks= _mmn_gauge=
   if [ -n "$_mmn_wsp" ] && [ "$_mmn_dest" != "$_mmn_wsp" ] \
       && [ -f "$_mmn_wsp/.claude/hooks/memnyx/compaction.sh" ]; then
     _mmn_hooks='{"hooks":{"PreCompact":[{"matcher":"*","hooks":[{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/compaction.sh pre","timeout":10}]}],"PostCompact":[{"matcher":"*","hooks":[{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/compaction.sh post","timeout":10}]}],"SessionStart":[{"matcher":"compact","hooks":[{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/compaction.sh resume","timeout":10}]}]}}'
+    _mmn_gauge=yes
+    for _mmn_f in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" \
+        "$_mmn_dest/.claude/settings.json" "$_mmn_dest/.claude/settings.local.json"; do
+      grep -qs '"statusLine"' "$_mmn_f" && _mmn_gauge=
+    done
+    [ -f "$_mmn_wsp/.claude/hooks/memnyx/statusline.sh" ] || _mmn_gauge=
+    if [ -n "$_mmn_gauge" ]; then
+      _mmn_hooks="${_mmn_hooks%?}"',"statusLine":{"type":"command","command":"bash \"$MEMNYX_WORKSPACE\"/.claude/hooks/memnyx/statusline.sh"}}'
+    fi
   fi
   printf '\n%s  mmn ▸ launching Claude%s\n' "$_mmn_hd" "$_mmn_rs"
   printf '%s  ├─ cd  %s %s\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_where"
   if [ -n "$_mmn_hooks" ]; then
     printf '%s  ├─ hooks %s compaction safeguard added with --settings (not at the workspace root, so its settings.json does not load)\n' "$_mmn_dm" "$_mmn_rs"
+    if [ -n "$_mmn_gauge" ]; then
+      printf '%s  ├─ gauge %s context gauge added too (no status line set in your settings or this folder'"'"'s)\n' "$_mmn_dm" "$_mmn_rs"
+    fi
     printf '%s  └─ run %s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir %s --settings <compaction hooks> %s\n\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_ws" "$*"
   else
     printf '%s  └─ run %s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir %s %s\n\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_ws" "$*"

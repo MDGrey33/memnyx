@@ -69,6 +69,16 @@ def run_sh(shell: str, script: str, *args: str, cwd: Path | None = None,
     )
 
 
+@pytest.fixture(autouse=True)
+def user_config(tmp_path: Path, monkeypatch) -> Path:
+    """An empty folder standing in for ~/.claude. The launcher reads the user's
+    settings to see whether a status line is set; it must never read the real ones."""
+    d = tmp_path / "user-config"
+    d.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(d))
+    return d
+
+
 def sourced_workspace(shell: str, file: Path, cwd: Path | None = None) -> str:
     r = run_sh(shell, PRINT_WS, str(file), cwd=cwd)
     assert r.returncode == 0, f"{shell} failed: {r.stderr}"
@@ -328,7 +338,7 @@ def test_mmn_passes_the_hooks_when_opening_a_project(shell, tmp_path, recording_
     with_hook_script(ws)
     r, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path)
     s = settings_arg(rec["args"])
-    assert s is not None and set(s) == {"hooks"}          # no statusLine
+    assert s is not None and set(s) == {"hooks"}          # no statusline.sh here, so no gauge
     assert {e: [g["matcher"] for g in s["hooks"][e]] for e in s["hooks"]} == {
         "PreCompact": ["*"], "PostCompact": ["*"], "SessionStart": ["compact"]}
     assert rec["ws"] == str(ws)
@@ -460,3 +470,55 @@ def test_a_cd_alias_is_skipped(shell, tmp_path, recording_claude):
     _, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path, setup=WRONG_FOLDER_ALIAS[shell])
     assert rec["cwd"] == str(ws / "projects" / "demo")
     assert settings_arg(rec["args"]) is not None
+
+
+
+def with_statusline_script(ws: Path) -> None:
+    script = ws / ".claude/hooks/memnyx/statusline.sh"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text('echo "GAUGE from $(cd "$(dirname "$0")/../../.." && pwd -P)"\n')
+
+
+@pytest.mark.parametrize("shell", ALL_SHELLS)
+def test_mmn_adds_the_gauge_when_no_status_line_is_set(shell, tmp_path, recording_claude):
+    ws = make_workspace(tmp_path)
+    with_hook_script(ws)
+    with_statusline_script(ws)
+    r, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path)
+    cmd = settings_arg(rec["args"])["statusLine"]["command"]
+    assert str(ws) not in cmd                              # no machine path in the JSON
+    out = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True,
+                         env={**os.environ, "MEMNYX_WORKSPACE": rec["ws"]}, cwd=rec["cwd"])
+    assert out.stdout.strip() == f"GAUGE from {ws}", out.stderr
+    assert "context gauge added too" in r.stdout
+
+
+def _status_line_in(where: str, ws: Path, user_config: Path) -> None:
+    files = {
+        "user": user_config / "settings.json",
+        "project": ws / "projects/demo/.claude/settings.json",
+        "project-local": ws / "projects/demo/.claude/settings.local.json",
+    }
+    files[where].parent.mkdir(parents=True, exist_ok=True)
+    files[where].write_text('{\n  "statusLine": {"type": "command", "command": "mine.sh"}\n}\n')
+
+
+@pytest.mark.parametrize("where", ["user", "project", "project-local"])
+@pytest.mark.parametrize("shell", ALL_SHELLS)
+def test_mmn_keeps_a_status_line_set_elsewhere(shell, where, tmp_path, recording_claude, user_config):
+    ws = make_workspace(tmp_path)
+    with_hook_script(ws)
+    with_statusline_script(ws)
+    _status_line_in(where, ws, user_config)
+    r, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path)
+    s = settings_arg(rec["args"])
+    assert s is not None and set(s) == {"hooks"}           # hooks still added
+    assert "context gauge added" not in r.stdout
+
+
+@pytest.mark.parametrize("shell", ALL_SHELLS)
+def test_mmn_adds_no_gauge_when_its_script_is_absent(shell, tmp_path, recording_claude):
+    ws = make_workspace(tmp_path)
+    with_hook_script(ws)                                   # no statusline.sh
+    _, rec = launch(shell, ws, "mmn demo", recording_claude, tmp_path)
+    assert set(settings_arg(rec["args"])) == {"hooks"}
