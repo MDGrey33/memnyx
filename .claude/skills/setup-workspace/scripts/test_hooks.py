@@ -77,6 +77,30 @@ def wire(ws: Path, tmp_path: Path, apply: bool = True, user: dict | None = None)
     return _hooks.wire_settings(ws, apply=apply, user_settings=user_file)
 
 
+def test_user_settings_follow_claude_config_dir(tmp_path, monkeypatch):
+    # Claude Code, and the mmn launcher, read user settings from $CLAUDE_CONFIG_DIR
+    # when it is set; setup must look in the same place.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
+    assert _hooks._default_user_settings() == tmp_path / "config" / "settings.json"
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR")
+    assert _hooks._default_user_settings() == tmp_path / "home" / ".claude" / "settings.json"
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "")                  # empty counts as unset
+    assert _hooks._default_user_settings() == tmp_path / "home" / ".claude" / "settings.json"
+
+
+def test_a_status_line_in_claude_config_dir_is_kept(tmp_path, monkeypatch):
+    ws = make_ws(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "settings.json").write_text('{"statusLine": {"type": "command", "command": "mine.sh"}}')
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config))
+    actions = _hooks.wire_settings(ws, apply=True)
+    assert any(a.startswith(f"kept your statusLine (set in {config / 'settings.json'})") for a in actions)
+    assert "statusLine" not in settings(ws)
+
+
 # --- unit: wire_settings -------------------------------------------------------
 
 def test_fresh_settings_gets_three_hooks_and_status_line(tmp_path):

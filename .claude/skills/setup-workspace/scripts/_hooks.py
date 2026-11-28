@@ -48,7 +48,18 @@ OUR_HOOK_COMMANDS = {hook_command(arg) for _, _, arg in HOOK_EVENTS}
 
 
 def _default_user_settings() -> Path:
-    return Path.home() / ".claude/settings.json"
+    """Claude Code's user settings: in $CLAUDE_CONFIG_DIR when it is set, else in
+    ~/.claude. The mmn launcher reads the same place, so the two agree on whether
+    you already have a status line."""
+    d = os.environ.get("CLAUDE_CONFIG_DIR")
+    return (Path(d).expanduser() if d else Path.home() / ".claude") / "settings.json"
+
+
+def _shown(path: Path) -> str:
+    """A path as a person would type it: ~ for the home folder."""
+    home = str(Path.home())
+    p = str(path)
+    return "~" + p[len(home):] if p == home or p.startswith(home + os.sep) else p
 
 
 def _wire_event(hooks: dict, event: str, matcher: str, want: str) -> tuple[list[str], bool]:
@@ -97,7 +108,7 @@ def _status_line_elsewhere(workspace: Path, user_settings: Path) -> str | None:
     """Name the other settings file that already sets a statusLine, if any."""
     for label, path in (
         (LOCAL_SETTINGS_REL, workspace / LOCAL_SETTINGS_REL),
-        ("~/.claude/settings.json", user_settings),
+        (_shown(user_settings), user_settings),
     ):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
