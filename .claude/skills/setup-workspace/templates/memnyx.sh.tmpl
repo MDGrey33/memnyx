@@ -15,7 +15,10 @@
 # backslash skips a `cd` alias (Omarchy aliases `cd` to zoxide's `zd`, which
 # prints an icon line and the path when given `--`), and the redirect drops
 # anything a `cd` function prints. Without both, the noise lands in the captured
-# path and the check after it fails silently: no hooks, or no project.
+# path and the check after it fails silently: no hooks, or no project. The
+# `cd` into the project before launching is `\cd` too, so an alias cannot send
+# Claude to another folder (zoxide does not record that jump). A `cd`
+# function still runs, so one that fails but returns 0 is not caught.
 #
 # This runs only once the file is being sourced. The line in your shell profile
 # that sources it holds an absolute path, so after moving a workspace re-run
@@ -147,7 +150,7 @@ _mmn_run() {
     printf '%s  └─ run %s CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir %s %s\n\n' "$_mmn_dm" "$_mmn_rs" "$_mmn_ws" "$*"
   fi
   if [ -n "$_mmn_tgt" ]; then
-    cd "$_mmn_tgt" || return 1
+    \cd "$_mmn_tgt" || return 1
   fi
   if [ -n "$_mmn_hooks" ]; then
     CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 claude --add-dir "$_mmn_ws" --settings "$_mmn_hooks" "$@"
