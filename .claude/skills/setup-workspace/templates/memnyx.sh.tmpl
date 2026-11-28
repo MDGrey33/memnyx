@@ -11,6 +11,12 @@
 # never guesses. The folder is reported as its physical path (symlinks resolved),
 # the same form `mmn <slug>` uses for the project folder.
 #
+# Every `$(cd … && pwd -P)` in this file is written `\cd … >/dev/null 2>&1`. The
+# backslash skips a `cd` alias (Omarchy aliases `cd` to zoxide's `zd`, which
+# prints an icon line and the path when given `--`), and the redirect drops
+# anything a `cd` function prints. Without both, the noise lands in the captured
+# path and the check after it fails silently: no hooks, or no project.
+#
 # This runs only once the file is being sourced. The line in your shell profile
 # that sources it holds an absolute path, so after moving a workspace re-run
 # `launcher.py --wire-profile`; until then the shell skips the file and `mmn` is
@@ -32,8 +38,8 @@ fi
 _mmn_found=
 if [ -n "$_mmn_self" ]; then
   case "$_mmn_self" in
-    */*) _mmn_found=$(CDPATH= cd -- "${_mmn_self%/*}/.." 2>/dev/null && pwd -P) ;;
-    *)   _mmn_found=$(CDPATH= cd -- .. 2>/dev/null && pwd -P) ;;
+    */*) _mmn_found=$(CDPATH= \cd -- "${_mmn_self%/*}/.." >/dev/null 2>&1 && pwd -P) ;;
+    *)   _mmn_found=$(CDPATH= \cd -- .. >/dev/null 2>&1 && pwd -P) ;;
   esac
 fi
 if [ -n "$_mmn_found" ] && [ -f "$_mmn_found/.claude/.workspace" ]; then
@@ -84,7 +90,7 @@ mmn() {
         echo "mmn: the workspace folder $_mmn_ws does not exist, so project '$1' cannot be found — run /setup-workspace sync to regenerate this file" >&2
         return 1
       fi
-      _mmn_dir=$(cd "$_mmn_ws/projects/$1" 2>/dev/null && pwd -P)
+      _mmn_dir=$(\cd "$_mmn_ws/projects/$1" >/dev/null 2>&1 && pwd -P)
       if [ -n "$_mmn_dir" ] && [ -d "$_mmn_dir" ]; then
         shift
         _mmn_run "$_mmn_dir" "$@"
@@ -126,7 +132,7 @@ _mmn_run() {
   # is left to the folder's own settings. At the root nothing is added, so the
   # hooks never fire twice.
   if [ -n "$_mmn_tgt" ]; then _mmn_dest="$_mmn_tgt"; else _mmn_dest=$(pwd -P); fi
-  _mmn_wsp=$(CDPATH= cd -- "$_mmn_ws" 2>/dev/null && pwd -P)
+  _mmn_wsp=$(CDPATH= \cd -- "$_mmn_ws" >/dev/null 2>&1 && pwd -P)
   _mmn_hooks=
   if [ -n "$_mmn_wsp" ] && [ "$_mmn_dest" != "$_mmn_wsp" ] \
       && [ -f "$_mmn_wsp/.claude/hooks/memnyx/compaction.sh" ]; then

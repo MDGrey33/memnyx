@@ -386,3 +386,71 @@ def test_user_flags_still_pass_through_with_the_hooks(shell, tmp_path, recording
     _, rec = launch(shell, ws, "mmn demo --model haiku", recording_claude, tmp_path)
     assert rec["args"][-2:] == ["--model", "haiku"]
     assert rec["args"][:2] == ["--add-dir", str(ws)]
+
+
+# A `cd` that prints. Omarchy aliases `cd` to `zd`, which prints an icon line and
+# the path when given `--`; other setups define `cd() { builtin cd "$@" && ls; }`.
+# The launcher captures `$(cd … && pwd -P)`, so any output from `cd` lands in the
+# captured path and the check that follows fails without a word. Each test sets
+# the noisy `cd` up before the launcher is sourced, as a shell profile would.
+NOISY_CD_FUNCTION = 'cd() { command cd "$@" && echo "NOISE from cd"; }'
+# zsh's `command` looks only for external programs, so its version uses `builtin`.
+NOISY_CD_ALIAS = {
+    "bash": 'shopt -s expand_aliases\n_noisy_cd() { builtin cd "$@" && echo "NOISE from cd"; }\nalias cd=_noisy_cd\n',
+    "zsh": '_noisy_cd() { builtin cd "$@" && echo "NOISE from cd"; }\nalias cd=_noisy_cd\n',
+}
+ALIAS_SHELLS = [s for s in NOISY_CD_ALIAS if shutil.which(s)]
+
+
+def launch_with(setup: str, shell: str, ws: Path, command: str, bin_dir: Path,
+                tmp_path: Path) -> dict:
+    """Like launch(), with `setup` run on its own lines before sourcing (an alias
+    takes effect only on lines read after it is defined)."""
+    record = tmp_path / "record.txt"
+    script = (f'MMN_TEST_RECORD="{record}"; export MMN_TEST_RECORD\n{setup}\n'
+              f'. "$1"\n{command}\n')
+    r = run_sh(shell, script, str(ws / "shell" / "memnyx.sh"), path_prefix=bin_dir)
+    assert r.returncode == 0, r.stderr + r.stdout
+    lines = record.read_text().splitlines()
+    return {"cwd": lines[0][4:], "ws": lines[1][3:], "args": [l[4:] for l in lines[2:]]}
+
+
+def noisy_cd_cases():
+    cases = [pytest.param(s, NOISY_CD_FUNCTION.replace("command cd", "builtin cd")
+                          if s == "zsh" else NOISY_CD_FUNCTION, id=f"{s}-function")
+             for s in ALL_SHELLS]
+    cases += [pytest.param(s, NOISY_CD_ALIAS[s], id=f"{s}-alias") for s in ALIAS_SHELLS]
+    return cases
+
+
+@pytest.mark.parametrize("shell,setup", noisy_cd_cases())
+def test_a_noisy_cd_does_not_drop_the_hooks_or_the_project(shell, setup, tmp_path, recording_claude):
+    ws = make_workspace(tmp_path)
+    with_hook_script(ws)
+    rec = launch_with(setup, shell, ws, "mmn demo", recording_claude, tmp_path)
+    assert rec["cwd"] == str(ws / "projects" / "demo")
+    assert settings_arg(rec["args"]) is not None
+
+
+@pytest.mark.parametrize("shell,setup",
+                         [p for p in noisy_cd_cases() if p.values[0] in SELF_LOCATING])
+def test_a_noisy_cd_does_not_stop_a_moved_workspace_finding_itself(shell, setup, tmp_path):
+    ws = make_workspace(tmp_path / "machine-a")
+    dest_parent = tmp_path / "machine-b"
+    dest_parent.mkdir()
+    new_ws = relocate(ws, dest_parent)
+    r = run_sh(shell, f'{setup}\n. "$1"\nprintf %s "$MEMNYX_WORKSPACE"\n',
+               str(new_ws / "shell" / "memnyx.sh"))
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == str(new_ws)
+
+
+@pytest.mark.parametrize("shell,setup", [p for p in noisy_cd_cases() if p.values[0] == "bash"])
+def test_a_noisy_cd_does_not_stop_a_bare_file_name_finding_itself(shell, setup, tmp_path):
+    # Same as test_bare_file_name_found_in_the_current_folder, with a noisy cd.
+    ws = make_workspace(tmp_path / "machine-a")
+    dest_parent = tmp_path / "machine-b"
+    dest_parent.mkdir()
+    new_ws = relocate(ws, dest_parent)
+    r = run_sh(shell, f'{setup}\n. memnyx.sh\nprintf %s "$MEMNYX_WORKSPACE"\n', cwd=new_ws / "shell")
+    assert (r.returncode, r.stdout) == (0, str(new_ws)), r.stderr
