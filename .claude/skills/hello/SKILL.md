@@ -184,7 +184,7 @@ Branches by count:
    Resume that work, or start fresh?
    ```
 
-   - **Resume** → adopt the marker as this session's marker. Load `open_item_slug` and `open_item_summary` from the frontmatter. **Cross-reference against the workstream file's open checkboxes — if the marker's `open_item_slug` maps to an item already marked `[x]`, the marker is stale; prompt the user to pick the live work from the workstream's `- [ ]` list before adopting.** Write `resumed_at: <ISO-8601 with TZ offset>` into the marker's frontmatter — add the field if missing, replace if present (only the most recent resume is tracked, no history list). Use mtime-check on this write since a concurrent `/hello` on the same marker could in principle race. **Skip step 12 (open-item resolution) and step 13 (marker write).** Record the resume decision for the final recap.
+   - **Resume** → adopt the marker as this session's marker. Load `open_item_slug` and `open_item_summary` from the frontmatter. **Cross-reference against the workstream file's open checkboxes — if the marker's `open_item_slug` maps to an item already marked `[x]`, the marker is stale; prompt the user to pick the live work from the workstream's `- [ ]` list before adopting.** Write `resumed_at: <ISO-8601 with TZ offset>` into the marker's frontmatter — add the field if missing, replace if present (only the most recent resume is tracked, no history list). In the same write, set `cc_session_id` to this session's id (step 13), replacing the old value: the adopting session is a different Claude Code session. Use mtime-check on this write since a concurrent `/hello` on the same marker could in principle race. **Skip step 12 (open-item resolution) and step 13 (marker write).** Record the resume decision for the final recap.
    - **Fresh** → proceed to step 12. The prior marker stays in `active/` untouched — we do not auto-promote, auto-delete, or auto-modify. Flag it in step 14's recap so the user can decide what to do with it.
 
 - **>1 matches** → list each candidate with age + open item summary. Ask the user to pick one to resume, or to start fresh. Apply the same downstream branches as the 1-match case. Any unrescued candidates are surfaced in step 14.
@@ -223,6 +223,7 @@ open_item_slug: <slug>
 open_item_summary: <verbatim checkbox text or user-named phrase>
 started_at: <ISO-8601 with TZ offset>
 session_id: <id>
+cc_session_id: <Claude Code's session id; omit if unavailable>
 ---
 
 Active session marker. Promoted to sessions/ by /bye on session close.
@@ -231,6 +232,8 @@ Active session marker. Promoted to sessions/ by /bye on session close.
 Atomic write. No mtime-check — the id is unique by construction, no race.
 
 **Optional field — `resumed_at`**: step 11's Resume branch later adds this to an adopted marker. Absence means the marker was never resumed. `/bye` step 3 surfaces it in the session narrative when present.
+
+**Optional field — `cc_session_id`**: Claude Code's own id for this session, which is what hooks receive as `session_id`. The compaction hooks match on it to find this session's marker among several active ones. Read it from the shell's `CLAUDE_CODE_SESSION_ID` (observed on Claude Code 2.1.330; not in the hooks docs) and add `cc_session_id: <value>` to the frontmatter. If the variable is empty, leave the field out: the hooks then list every active marker, as before. `session_id` stays Memnyx's own id; the two are not interchangeable.
 
 ### 14. Final recap
 

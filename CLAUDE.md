@@ -52,7 +52,7 @@ Run `/setup-workspace init --workspace <path>` to initialise a workspace (see RE
 
 | Skill | Purpose |
 |-------|---------|
-| `/setup-workspace` | (v2) Workspace lifecycle — `init` (first-time setup: deploys skills/agents/docs, generates `CLAUDE.md`), `add-project <slug>` (scaffolds + registers a project), `sync` (re-copies skills/agents from source, flags conflicts) |
+| `/setup-workspace` | (v2) Workspace lifecycle — `init` (first-time setup: deploys skills/agents/docs, generates `CLAUDE.md`), `add-project <slug>` (scaffolds + registers a project), `sync` (re-copies skills/agents/hook scripts from source, flags conflicts; wires the compaction-safeguard hooks into `settings.json`) |
 | `/project-registry` | (v2) Manage the workspace project registry — `add` / `remove` / `update` / `list`. Single mutation point; other skills read the index directly. |
 | `/hello` | Start a new session — loads context, checks MCP health, recaps last session |
 | `/bye` | End the session — summarize work, capture lessons, persist memory |

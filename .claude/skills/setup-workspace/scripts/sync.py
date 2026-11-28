@@ -9,7 +9,8 @@ Usage:
 Walks two surfaces:
 
   1. Upstream-owned content (`.claude/skills/**`, `.claude/agents/**`,
-     `.claude/docs/agent-guardrails.md`) — fully bucketed and acted on.
+     `.claude/hooks/memnyx/**`, `.claude/docs/agent-guardrails.md`) — fully bucketed
+     and acted on.
   2. Starter files (workspace-level + per-registered-project) — bucketed
      with the `update` bucket SUPPRESSED. Starters are user-evolved after
      init; sync only ever offers to deploy `new` ones, never to overwrite
@@ -33,7 +34,11 @@ Source path defaults to the absolute path stored in `<workspace>/.claude/.source
 Does NOT touch user-evolved content directly: CLAUDE.md, MEMORY.md, lessons-learned.md,
 identity, workstreams, sessions, settings.json, project-context.md, or other
 .claude/docs/* templates. The starter walk does *report* divergence for files in
-these categories, but never overwrites.
+these categories, but never overwrites. One narrow exception: on --apply-all,
+settings.json gets the Memnyx-owned compaction-safeguard hook entries added
+(recognised by their exact command; duplicates of them removed) and a
+statusLine only if no settings scope has one; nothing else in it is changed or
+removed (see _hooks.py).
 """
 
 from __future__ import annotations
@@ -61,11 +66,12 @@ from _common import (
     CLAUDE_MD_MEMORY_INCLUDE,
 )
 import launcher  # launcher.write_memnyx_sh regenerates the mmn shell launcher on apply
+import _hooks  # wires the compaction-safeguard hooks into settings.json
 
 SOURCE_REF_REL = ".claude/.source"
 REGISTRY_REL = ".claude/projects-index.json"
 
-SYNCED_DIRS = [".claude/skills", ".claude/agents"]
+SYNCED_DIRS = [".claude/skills", ".claude/agents", ".claude/hooks/memnyx"]
 SYNCED_FILES = [".claude/docs/agent-guardrails.md"]
 
 STARTERS_WORKSPACE_DIR_REL = ".claude/skills/setup-workspace/templates/starters/workspace"
@@ -369,7 +375,7 @@ def print_plan(workspace: Path, source: Path, plan: dict, starter_plan: dict) ->
     print(f"workspace: {workspace}")
     print(f"source:    {source}")
     print()
-    print("-- upstream-owned (skills, agents, agent-guardrails) --")
+    print("-- upstream-owned (skills, agents, hooks, agent-guardrails) --")
     print(f"== update ({len(plan['update'])}) ==")
     for rel in plan["update"]:
         print(f"M {rel}")
@@ -492,6 +498,10 @@ def main() -> None:
         for action in reconcile_claude_layers(workspace, source, apply=False):
             print(f"  {action}")
         print()
+        print("-- settings.json hooks (compaction safeguard; applied only on --apply-all) --")
+        for action in _hooks.wire_settings(workspace, apply=False):
+            print(f"  {action}")
+        print()
         print_claude_md_memory_advisory(claude_md_missing_memory_include(workspace))
         return
 
@@ -507,6 +517,7 @@ def main() -> None:
     applied.append("shell/memnyx.sh (mmn launcher, regenerated)")
 
     layer_actions = reconcile_claude_layers(workspace, source, apply=True) if args.apply_all else []
+    hook_actions = _hooks.wire_settings(workspace, apply=True) if args.apply_all else []
     # --apply-all may have restored the @MEMORY include while rewriting the base, so
     # recompute the advisory off post-apply state, not the pre-apply snapshot above.
     missing_includes = claude_md_missing_memory_include(workspace)
@@ -523,6 +534,11 @@ def main() -> None:
         print()
         print("CLAUDE layers:")
         for action in layer_actions:
+            print(f"  {action}")
+    if hook_actions:
+        print()
+        print("settings.json hooks:")
+        for action in hook_actions:
             print(f"  {action}")
     if skipped:
         print()

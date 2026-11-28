@@ -40,7 +40,7 @@ Semantic memory (optional): markdown memory works with no extra setup. For seman
 
 | Skill | Trigger | Purpose |
 |-------|---------|---------|
-| `/setup-workspace` | Manual | (v2) Workspace lifecycle: `init` (first-time setup, deploys skills/agents/docs, generates `CLAUDE.md`), `add-project <slug> [description]` (scaffolds a project under `<workspace>/projects/<slug>/`, registers it — includes `CLAUDE.md`, memory files, and `docs/architecture.md` + `docs/conventions.md`), `sync` (re-copies skills/agents from source clone, flags conflicts before overwrite). |
+| `/setup-workspace` | Manual | (v2) Workspace lifecycle: `init` (first-time setup, deploys skills/agents/docs, generates `CLAUDE.md`), `add-project <slug> [description]` (scaffolds a project under `<workspace>/projects/<slug>/`, registers it — includes `CLAUDE.md`, memory files, and `docs/architecture.md` + `docs/conventions.md`), `sync` (re-copies skills/agents/hook scripts from source clone, flags conflicts before overwrite; wires the compaction-safeguard hooks into `settings.json`). |
 | `/project-registry` | Auto (via `/setup-workspace`) or manual | (v2) Manage the workspace project registry — `add` / `remove` / `update` / `list`. Single mutation point; other skills read the index file directly. |
 | `/hello` | Manual | Start a new session — load context, check MCP health, recap last session |
 | `/bye` | Manual | End the session — summarize work, capture lessons, persist memory |
@@ -194,6 +194,14 @@ Claude Code reads memory in two passes at session start:
 Workspace and project memory follow the same pattern as the harness: the workspace `CLAUDE.md` `@`-includes `<workspace>/.claude/memory/MEMORY.md`; each project's `CLAUDE.md` does the same at project scope. The index loads at session start; topic files referenced inside (`feedback_*.md`, `convention_*.md`, etc.) are read on demand. Engineers entering a project repo directly — without setting up the workspace — still get the project's curated memory index loaded automatically via the project's `CLAUDE.md` `@`-include.
 
 Memnyx never redirects, wraps, or overrides the harness auto-memory. Two parallel layers: the harness carries per-user notes the harness writes; workspace and project memory carry curated patterns written by `/bye`. See [Optional: Auto-Memory System](#optional-auto-memory-system) below for the auto-memory layer's curation discipline and the `setup-auto-memory` skill that wires it in.
+
+### Surviving context compaction
+
+Claude Code can replace the earlier part of a conversation with a summary at any time. Two things keep work from being lost when it does:
+
+- **A habit** (in `agent-guardrails.md`): decisions, open questions and anything waiting on someone go into the workstream ledger in the turn they arise, so the files, not the conversation, carry the session.
+- **Hooks**, wired into `.claude/settings.json` by `/setup-workspace init` and `sync` (scripts in `.claude/hooks/memnyx/`): before compaction, they tell the summary what to keep and list this session's marker and ledger; after it, they save the summary under `artifacts/compaction-safeguard/log/` for review; on resume, they point the agent back at the marker and ledger. `/hello` records Claude Code's session id in the marker so the hooks can pick this session's marker out of several active ones. A status-line gauge shows how full the context is, installed only if no settings scope (workspace, local, or the user's `settings.json` in `$CLAUDE_CONFIG_DIR`, default `~/.claude`) has a status line already. Hook commands use `$CLAUDE_PROJECT_DIR`, so a committed `settings.json` works on every machine.
+- **Limit:** Claude Code loads the workspace's `settings.json` only when it starts at the workspace root itself. A session started in a subfolder or in a project's own clone has no hooks, gauge or compaction log, unless the hooks are passed in with `--settings`. The habit still applies.
 
 ### Team & leadership features
 
